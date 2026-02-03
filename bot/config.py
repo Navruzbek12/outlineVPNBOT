@@ -18,6 +18,7 @@ class Config:
     PAYMENT_CARD_NAME = os.getenv('PAYMENT_CARD_NAME', '')
     PAYMENT_BANK = os.getenv('PAYMENT_BANK', '')
     
+    
     # Adminlar
     ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '').split(','))) if os.getenv('ADMIN_IDS') else []
     ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID')
@@ -39,6 +40,7 @@ class Config:
     
     # Database
     DATABASE_NAME = os.getenv('DATABASE_NAME', 'vpn_bot.db')
+    PORT = int(os.getenv("PORT", 8080))  # <-- Port qo'shildi
 
     DAILY_FEE_RUB = int(os.getenv('DAILY_FEE_RUB', '5'))  # Kunlik to'lov
     MIN_BALANCE_FOR_KEY = int(os.getenv('MIN_BALANCE_FOR_KEY', '5'))  # Kalit uchun minimal balans
