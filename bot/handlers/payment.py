@@ -299,7 +299,7 @@ async def award_referral_bonus(user_id: int, first_name: str, username: str, bot
                             f"📈 <b>Bonus:</b> {bonus_days} kunlik VPN ({bonus_rub} RUB)\n"
                             f"💰 <b>Eski balans:</b> {referrer['balance_rub']} RUB\n"
                             f"💰 <b>Yangi balans:</b> {referrer['balance_rub'] + bonus_rub} RUB\n\n"
-                            f"🎁 <b>Bonus avtomatik balansingizga qo'shildi!</b>",
+                            f"🎁 <b>Bonus avtomatik balansingizga qo'shildi!</b>"
                             parse_mode="HTML"
                         )
                 except Exception as e:
