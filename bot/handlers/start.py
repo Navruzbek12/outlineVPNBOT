@@ -1,4 +1,4 @@
-# bot/handlers/start.py - TO'LIQ TO'G'RILANGAN
+# bot/handlers/start.py - TO'LIQ TUZATILGAN
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -57,7 +57,7 @@ async def cmd_start(message: Message):
     if not user_exists:
         # Yangi foydalanuvchi qo'shish
         db.add_user(user_id, first_name, username)
-        logger.info(f"✅ New user added: {user_id} - {first_name}")
+        logger.info(f"New user added: {user_id} - {first_name}")
         
         # Agar referal orqali kelsa
         if referrer_id and referrer_id != user_id:
@@ -67,10 +67,10 @@ async def cmd_start(message: Message):
             welcome_text = (
                 f"👋 Salom, {first_name}!\n\n"
                 f"🎉 Siz do'stingiz taklifi bilan botga qo'shildingiz!\n\n"
-                f"🤝 <b>Do'stingiz bonus oldi:</b>\n"
+                f"🤝 Do'stingiz bonus oldi:\n"
                 f"• {Config.REFERRAL_BONUS_DAYS} kunlik VPN\n"
                 f"• {Config.REFERRAL_BONUS_DAYS * Config.DAILY_FEE_RUB} RUB qiymatida\n\n"
-                f"🚀 <b>Boshlash uchun:</b>\n"
+                f"🚀 Boshlash uchun:\n"
                 f"1. 💳 Balansingizni to'ldiring\n"
                 f"2. 🔐 VPN kalit oling\n"
                 f"3. 📱 Outline ilovasini o'rnating\n\n"
@@ -79,22 +79,22 @@ async def cmd_start(message: Message):
         else:
             welcome_text = (
                 f"👋 Salom, {first_name}!\n\n"
-                f"🚀 <b>VPN botiga xush kelibsiz!</b>\n\n"
-                f"🔐 <b>Xizmatlar:</b>\n"
+                f"🚀 VPN botiga xush kelibsiz!\n\n"
+                f"🔐 Xizmatlar:\n"
                 f"• Tezkor va xavfsiz VPN\n"
                 f"• Cheklovsiz internet\n"
                 f"• Bloklangan saytlarga kirish\n\n"
-                f"💰 <b>Narxlar:</b>\n"
+                f"💰 Narxlar:\n"
                 f"• Kunlik: {Config.DAILY_FEE_RUB} RUB\n"
                 f"• Oylik: {Config.PRICE_1_MONTH} RUB\n"
                 f"• Yillik: {Config.PRICE_1_YEAR} RUB\n\n"
-                f"👥 <b>Bonus:</b> Do'stlaringizni taklif qiling va "
+                f"👥 Bonus: Do'stlaringizni taklif qiling va "
                 f"{Config.REFERRAL_BONUS_DAYS} kunlik bonus oling!"
             )
     else:
         welcome_text = (
             f"👋 Qaytganingiz bilan, {first_name}!\n\n"
-            f"🤖 <b>VPN botiga xush kelibsiz!</b>\n"
+            f"🤖 VPN botiga xush kelibsiz!\n"
             f"Quyidagi bo'limlardan foydalaning:"
         )
     
@@ -108,7 +108,7 @@ async def cmd_start(message: Message):
 async def back_to_main(callback: CallbackQuery):
     """Asosiy menyuga qaytish"""
     await callback.message.answer(
-        "🏠 <b>Asosiy menyu</b>\n\n"
+        "🏠 Asosiy menyu\n\n"
         "Quyidagi bo'limlardan birini tanlang:",
         reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML"
@@ -119,7 +119,7 @@ async def back_to_main(callback: CallbackQuery):
 async def cmd_menu(message: Message):
     """Menyu komandasi"""
     await message.answer(
-        "🏠 <b>Asosiy menyu</b>\n\n"
+        "🏠 Asosiy menyu\n\n"
         "Quyidagi bo'limlardan birini tanlang:",
         reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML"
@@ -133,18 +133,22 @@ async def show_my_stats(callback: CallbackQuery):
     user = db.get_user(user_id)
     
     if not user:
-        await callback.answer("❌ Foydalanuvchi topilmadi")
+        await callback.answer("Foydalanuvchi topilmadi")
         return
     
+    # BACKSLASH XATOSINI HAL QILISH
+    created_at = user.get('created_at', 'Nomalum')
+    
     stats_text = (
-        f"📊 <b>Sizning statistikangiz</b>\n\n"
-        f"👤 <b>Ism:</b> {user['first_name']}\n"
-        f"💰 <b>Balans:</b> {user.get('balance_rub', 0)} RUB\n"
-        f"📅 <b>Ro'yxatdan o'tgan:</b> {user.get('created_at', 'Noma\'lum')}\n\n"
-        f"🔑 <b>Aktiv kalitlar:</b> {len(db.get_active_keys(user_id))} ta\n"
-        f"💳 <b>To'lovlar:</b> {len(db.get_user_payments(user_id))} ta\n"
-        f"👥 <b>Referallar:</b> {db.get_referrals_count(user_id)} ta\n\n"
-        f"⚠️ <b>Kunlik to'lov:</b> {Config.DAILY_FEE_RUB} RUB")
+        f"📊 Sizning statistikangiz\n\n"
+        f"👤 Ism: {user['first_name']}\n"
+        f"💰 Balans: {user.get('balance_rub', 0)} RUB\n"
+        f"📅 Ro'yxatdan o'tgan: {created_at}\n\n"
+        f"🔑 Aktiv kalitlar: {len(db.get_active_keys(user_id))} ta\n"
+        f"💳 To'lovlar: {len(db.get_user_payments(user_id))} ta\n"
+        f"👥 Referallar: {db.get_referrals_count(user_id)} ta\n\n"
+        f"⚠️ Kunlik to'lov: {Config.DAILY_FEE_RUB} RUB"
+    )
     
     builder = InlineKeyboardBuilder()
     builder.row(
