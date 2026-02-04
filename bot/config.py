@@ -10,7 +10,7 @@ class Config:
     
     # Outline API - TO'G'RI O'QISH
     OUTLINE_SERVER_URL = os.getenv('OUTLINE_SERVER_URL', '')
-    OUTLINE_API_PORT = os.getenv('OUTLINE_API_PORT', '41194')
+    OUTLINE_API_PORT = os.getenv('OUTLINE_API_PORT', '43437')
     OUTLINE_API_SECRET = os.getenv('OUTLINE_API_SECRET', '')
     
     # To'lov karta ma'lumotlari
