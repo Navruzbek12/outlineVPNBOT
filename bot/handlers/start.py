@@ -27,7 +27,7 @@ def get_main_menu_keyboard():
     
     builder.row(
         InlineKeyboardButton(text="👥 Do'stlarni taklif qilish", callback_data="referral"),
-        InlineKeyboardButton(text="🆘 Yordam", callback_data="help")
+        InlineKeyboardButton(text="🆘 Yordam", callback_data="help_menu")
     )
     
     # Admin panel (agar admin bo'lsa)
