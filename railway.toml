@@ -1,8 +1,6 @@
 # railway.toml
 [build]
-builder = "railpack"
-watchPaths = []
-buildCommand = "pip install -r requirements.txt"
+builder = "dockerfile"
 
 [deploy]
 startCommand = "python main.py"
@@ -30,4 +28,3 @@ DEFAULT_KEY_LIMIT_GB = "10"
 FREE_TRIAL_DAYS = "3"
 DATABASE_NAME = "vpn_bot.db"
 PORT = "10000"
-PYTHON_VERSION = "3.11.0"  # <-- Qo'shildi
