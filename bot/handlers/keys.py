@@ -16,19 +16,20 @@ logger = logging.getLogger(__name__)
 db = Database()
 
 # Outline API ni yuklash
+# keys.py da quyidagini o'zgartiring:
 try:
     from bot.outline_api import OutlineAPI
     outline_api = OutlineAPI()
-    logger.info("OutlineAPI loaded successfully")
+    logger.info("✅ OutlineAPI loaded successfully")
 except Exception as e:
-    logger.warning(f"OutlineAPI not found: {e}, using mock")
+    logger.warning(f"⚠️ OutlineAPI not found: {e}, using mock")
     try:
         from bot.mock_outline import MockOutlineAPI
         outline_api = MockOutlineAPI()
     except ImportError:
         class SimpleMockAPI:
             def create_key(self, name, limit_gb=10):
-                return {'success': True, 'data': {'id': 'mock', 'accessUrl': 'https://example.com'}}
+                return {'success': True, 'data': {'id': 'mock', 'accessUrl': 'https://example.com/key'}}
             def test_connection(self): return True
         outline_api = SimpleMockAPI()
 
