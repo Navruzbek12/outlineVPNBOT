@@ -1,4 +1,4 @@
-# main.py
+# main.py - TO'LIQ YANGILANGAN
 import asyncio
 import logging
 import sys
@@ -90,9 +90,9 @@ async def cleanup_background_tasks(app):
             pass
 
 def main():
-    """Asosiy funksiya"""
+    """Asosiy funksiya - HTTP SERVER BILAN"""
     # Portni olish
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     
     # Aiohttp application yaratish
     app = web.Application()
