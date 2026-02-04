@@ -254,10 +254,10 @@ async def show_my_keys(callback: CallbackQuery):
         
         for i, key in enumerate(keys, 1):
             keys_text += (
-                f"{i}. <b>Kalit ID:</b> {key.get('key_id', 'Noma\'lum')[:10]}...\n"
-                f"   📅 <b>Sana:</b> {key.get('created_at', 'Noma\'lum')}\n"
+                f"{i}. <b>Kalit ID:</b> {key.get('key_id', 'Nomalum')[:10]}...\n"
+                f"   📅 <b>Sana:</b> {key.get('created_at', 'Nomalum')}\n"
                 f"   💰 <b>To'lov:</b> {key.get('amount_rub', 0)} RUB\n"
-                f"   🔗 <b>Link:</b> <code>{key.get('access_url', 'Noma\'lum')}</code>\n\n"
+                f"   🔗 <b>Link:</b> <code>{key.get('access_url', 'Nomalum')}</code>\n\n"
             )
         
         builder = InlineKeyboardBuilder()
