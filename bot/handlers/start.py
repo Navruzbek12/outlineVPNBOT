@@ -144,8 +144,7 @@ async def show_my_stats(callback: CallbackQuery):
         f"🔑 <b>Aktiv kalitlar:</b> {len(db.get_active_keys(user_id))} ta\n"
         f"💳 <b>To'lovlar:</b> {len(db.get_user_payments(user_id))} ta\n"
         f"👥 <b>Referallar:</b> {db.get_referrals_count(user_id)} ta\n\n"
-        f"⚠️ <b>Kunlik to'lov:</b> {Config.DAILY_FEE_RUB} RUB"
-    )
+        f"⚠️ <b>Kunlik to'lov:</b> {Config.DAILY_FEE_RUB} RUB")
     
     builder = InlineKeyboardBuilder()
     builder.row(
