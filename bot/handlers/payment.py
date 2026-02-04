@@ -1,4 +1,4 @@
-# bot/handlers/payment.py - TO'LIQ TUZATILGAN VERSIYA
+# bot/handlers/payment.py - REFERAL BONUS QO'SHILGAN VERSIYA
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -237,8 +237,6 @@ async def receive_screenshot(message: Message, state: FSMContext):
     # State ni tozalash
     await state.clear()
 
-# =========== ADMIN TO'LOV TASDIQLASH ===========
-
 def get_success_keyboard():
     """To'lov tasdiqlangandan keyingi klaviatura"""
     builder = InlineKeyboardBuilder()
@@ -254,9 +252,64 @@ def get_success_keyboard():
     
     return builder.as_markup()
 
+# REFERAL BONUS FUNCTIONS
+async def award_referral_bonus(user_id: int, first_name: str, username: str, bot):
+    """To'lov qilgan foydalanuvchi uchun referal bonus berish"""
+    try:
+        # Referalni kim taklif qilganini topish
+        from bot.database import Database
+        db = Database()
+        
+        referrals = db.get_referrals_by_referred(user_id)
+        
+        for referral in referrals:
+            if referral.get('status') == 'active' and not referral.get('bonus_awarded', 0):
+                referrer_id = referral['referrer_id']
+                
+                # Bonus berish
+                bonus_days = Config.REFERRAL_BONUS_DAYS
+                bonus_rub = bonus_days * Config.DAILY_FEE_RUB
+                
+                # Referrer balansini yangilash
+                db.update_user_balance(referrer_id, bonus_rub)
+                
+                # Referal holatini yangilash
+                try:
+                    db.cursor.execute('''
+                        UPDATE referrals 
+                        SET bonus_awarded = 1, status = 'completed'
+                        WHERE referred_id = ? AND referrer_id = ?
+                    ''', (user_id, referrer_id))
+                    db.conn.commit()
+                except Exception as e:
+                    logger.error(f"Referral update error: {e}")
+                
+                logger.info(f"🎁 Referral bonus awarded: {referrer_id} <- {user_id} ({bonus_rub} RUB)")
+                
+                # Referrer ga xabar
+                try:
+                    referrer = db.get_user(referrer_id)
+                    if referrer:
+                        referrer_name = referrer.get('first_name', 'Foydalanuvchi')
+                        
+                        await bot.send_message(
+                            referrer_id,
+                            f"🎉 <b>Tabriklaymiz! Sizning referalingiz to'lov qildi!</b>\n\n"
+                            f"👤 <b>Referal:</b> {first_name} (@{username if username else 'Noma\'lum'})\n"
+                            f"📈 <b>Bonus:</b> {bonus_days} kunlik VPN ({bonus_rub} RUB)\n"
+                            f"💰 <b>Eski balans:</b> {referrer['balance_rub']} RUB\n"
+                            f"💰 <b>Yangi balans:</b> {referrer['balance_rub'] + bonus_rub} RUB\n\n"
+                            f"🎁 <b>Bonus avtomatik balansingizga qo'shildi!</b>",
+                            parse_mode="HTML"
+                        )
+                except Exception as e:
+                    logger.error(f"Referrer notification error: {e}")
+    except Exception as e:
+        logger.error(f"Referral bonus error: {e}")
+
 @router.message(F.text)
 async def approve_payment(message: Message):
-    """To'lovni tasdiqlash (admin)"""
+    """To'lovni tasdiqlash (admin) - REFERAL BONUS QO'SHILGAN"""
     # Avval text borligini tekshirish
     if not message.text or not message.text.startswith('/approve_'):
         return
@@ -312,7 +365,7 @@ async def approve_payment(message: Message):
             await message.answer(f"❌ Foydalanuvchi topilmadi: {user_id}")
             return
         
-        logger.info(f"✅ User found: {user['first_name']}, Current balance: {user['balance_rub']} RUB")  # ⬅️ FIXED
+        logger.info(f"✅ User found: {user['first_name']}, Current balance: {user.get('balance_rub', 0)} RUB")
         
         # 2. To'lovni tasdiqlash
         if db.approve_payment(user_id, payment_type):
@@ -326,10 +379,18 @@ async def approve_payment(message: Message):
             await message.answer("❌ Yangilangan foydalanuvchini olishda xatolik")
             return
         
-        new_balance = updated_user['balance_rub']  # ⬅️ FIXED
+        new_balance = updated_user.get('balance_rub', 0)
         logger.info(f"✅ New balance for user {user_id}: {new_balance} RUB")
         
-        # 4. Foydalanuvchiga xabar yuborish
+        # 4. REFERAL BONUS BERISH
+        await award_referral_bonus(
+            user_id=user_id,
+            first_name=user['first_name'],
+            username=user.get('username', ''),
+            bot=message.bot
+        )
+        
+        # 5. Foydalanuvchiga xabar yuborish
         try:
             keyboard = get_success_keyboard()
             
@@ -351,7 +412,7 @@ async def approve_payment(message: Message):
             logger.error(f"❌ User notification error: {e}")
             await message.answer(f"⚠️ Foydalanuvchiga xabar yuborishda xatolik: {e}")
         
-        # 5. Adminga muvaffaqiyatli javob
+        # 6. Adminga muvaffaqiyatli javob
         success_msg = (
             f"✅ <b>To'lov tasdiqlandi va balans yangilandi!</b>\n\n"
             f"👤 <b>Foydalanuvchi:</b> {user_id}\n"
@@ -359,6 +420,7 @@ async def approve_payment(message: Message):
             f"💰 <b>Tarif:</b> {price_info['label']}\n"
             f"💵 <b>Summa:</b> {price_info['amount']} RUB\n"
             f"📊 <b>Yangi balans:</b> {new_balance} RUB\n\n"
+            f"🎁 <b>Referal bonus tekshirildi va berildi (agar bor bo'lsa)</b>\n"
             f"📨 <b>Foydalanuvchiga xabar yuborildi.</b>"
         )
         
