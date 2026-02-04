@@ -281,7 +281,52 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error approving payment for user {user_id}: {e}")
             return False
-    
+
+    # bot/database.py ga quyidagilarni qo'shing:
+def get_referrals_by_referred(self, referred_id: int):
+    """Foydalanuvchi kim tomonidan taklif qilinganligini topish"""
+    try:
+        self.cursor.execute('''
+            SELECT * FROM referrals 
+            WHERE referred_id = ? AND status = 'active' AND bonus_awarded = 0
+        ''', (referred_id,))
+        
+        columns = [column[0] for column in self.cursor.description]
+        results = []
+        for row in self.cursor.fetchall():
+            results.append(dict(zip(columns, row)))
+        return results
+    except Exception as e:
+        self.logger.error(f"Error getting referrals by referred: {e}")
+        return []
+
+def update_referral_bonus_status(self, referred_id: int, referrer_id: int):
+    """Referal bonus holatini yangilash"""
+    try:
+        self.cursor.execute('''
+            UPDATE referrals 
+            SET bonus_awarded = 1, status = 'completed'
+            WHERE referred_id = ? AND referrer_id = ?
+        ''', (referred_id, referrer_id))
+        self.conn.commit()
+        return True
+    except Exception as e:
+        self.logger.error(f"Error updating referral bonus: {e}")
+        return False
+
+def update_user_balance(self, user_id: int, amount: float):
+    """Foydalanuvchi balansini yangilash (qo'shish)"""
+    try:
+        self.cursor.execute('''
+            UPDATE users 
+            SET balance_rub = balance_rub + ?
+            WHERE telegram_id = ?
+        ''', (amount, user_id))
+        self.conn.commit()
+        return True
+    except Exception as e:
+        self.logger.error(f"Error updating user balance: {e}")
+        return False
     def get_active_keys(self, user_id):
         """Foydalanuvchining aktiv kalitlari"""
         try:
