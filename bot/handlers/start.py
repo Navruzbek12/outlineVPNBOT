@@ -1,4 +1,4 @@
-# bot/handlers/start.py
+,# bot/handlers/start.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -26,7 +26,7 @@ def get_main_menu_keyboard():
     )
     
     builder.row(
-        InlineKeyboardButton(text="👥 Do'stlarni taklif qilish", callback_data="referral"),
+        InlineKeyboardButton(text="👥 Do'stlarni taklif qilish", callback_data="referral_menu"),
         InlineKeyboardButton(text="🆘 Yordam", callback_data="help_menu")
     )
     
