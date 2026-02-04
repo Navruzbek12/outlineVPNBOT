@@ -1,0 +1,33 @@
+# railway.toml
+[build]
+builder = "railpack"
+watchPaths = []
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "python main.py"
+healthcheckPath = "/health"
+restartPolicy = { maxRetries = 10 }
+serverless = true
+
+[variables]
+BOT_TOKEN = "8539085576:AAEkAp8oGqUSdKhw0oGlzQQRXRAVu2MGU1o"
+OUTLINE_SERVER_URL = "https://83.219.250.58:43437"
+OUTLINE_API_SECRET = "wcpJ2WhpAnqjbnaU--guJg"
+ADMIN_IDS = "7813148656"
+PAYMENT_CARD_NUMBER = "22022080224690399"
+PAYMENT_CARD_NAME = "Navruzbek Bobobekov"
+PAYMENT_BANK = "Sberbank"
+PRICE_1_MONTH = "150"
+PRICE_3_MONTH = "400"
+PRICE_1_YEAR = "1200"
+BONUS_DAYS_1_MONTH = "30"
+BONUS_DAYS_3_MONTH = "90"
+BONUS_DAYS_1_YEAR = "365"
+ADMIN_CHAT_ID = "7813148656"
+REFERRAL_BONUS_DAYS = "7"
+DEFAULT_KEY_LIMIT_GB = "10"
+FREE_TRIAL_DAYS = "3"
+DATABASE_NAME = "vpn_bot.db"
+PORT = "10000"
+PYTHON_VERSION = "3.11.0"  # <-- Qo'shildi
