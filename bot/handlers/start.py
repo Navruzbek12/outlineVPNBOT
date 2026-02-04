@@ -38,42 +38,77 @@ def get_main_menu_keyboard():
     
     return builder.as_markup()
 
-@router.message(CommandStart())
-async def cmd_start(message: Message):
-    """Start komandasi"""
-    try:
-        # Foydalanuvchini bazaga qo'shish
-        telegram_id = message.from_user.id
-        username = message.from_user.username
-        first_name = message.from_user.first_name
+# bot/handlers/start.py - START HANDLER WITH REFERRAL
+@router.message(Command("start"))
+async def cmd_start(message: Message, command: CommandObject = None):
+    """Start komandasi - referal bilan"""
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    username = message.from_user.username
+    
+    # Referal parametrini tekshirish
+    referrer_id = None
+    if command and command.args:
+        try:
+            # "ref12345" formatidan raqamni olish
+            if command.args.startswith('ref'):
+                referrer_id = int(command.args[3:])
+                logger.info(f"Referral detected: {referrer_id} -> {user_id}")
+        except:
+            pass
+    
+    # Foydalanuvchi mavjudligini tekshirish
+    user_exists = db.get_user(user_id)
+    
+    if not user_exists:
+        # Yangi foydalanuvchi qo'shish
+        db.add_user(user_id, first_name, username)
+        logger.info(f"✅ New user added: {user_id} - {first_name}")
         
-        db.add_user(telegram_id, username, first_name)
-        logger.info(f"New user: {telegram_id} - {first_name}")
-        
-        # Xush kelibsiz xabari
+        # Agar referal orqali kelsa
+        if referrer_id and referrer_id != user_id:
+            # Referalni qo'shish
+            db.add_referral(referrer_id, user_id)
+            
+            welcome_text = (
+                f"👋 Salom, {first_name}!\n\n"
+                f"🎉 Siz do'stingiz taklifi bilan botga qo'shildingiz!\n\n"
+                f"🤝 <b>Do'stingiz bonus oldi:</b>\n"
+                f"• {Config.REFERRAL_BONUS_DAYS} kunlik VPN\n"
+                f"• {Config.REFERRAL_BONUS_DAYS * Config.DAILY_FEE_RUB} RUB qiymatida\n\n"
+                f"🚀 <b>Boshlash uchun:</b>\n"
+                f"1. 💳 Balansingizni to'ldiring\n"
+                f"2. 🔐 VPN kalit oling\n"
+                f"3. 📱 Outline ilovasini o'rnating\n\n"
+                f"Siz ham do'stlaringizni taklif qilib bonus olishingiz mumkin!"
+            )
+        else:
+            welcome_text = (
+                f"👋 Salom, {first_name}!\n\n"
+                f"🚀 <b>VPN botiga xush kelibsiz!</b>\n\n"
+                f"🔐 <b>Xizmatlar:</b>\n"
+                f"• Tezkor va xavfsiz VPN\n"
+                f"• Cheklovsiz internet\n"
+                f"• Bloklangan saytlarga kirish\n\n"
+                f"💰 <b>Narxlar:</b>\n"
+                f"• Kunlik: {Config.DAILY_FEE_RUB} RUB\n"
+                f"• Oylik: {Config.PRICE_1_MONTH} RUB\n"
+                f"• Yillik: {Config.PRICE_1_YEAR} RUB\n\n"
+                f"👥 <b>Bonus:</b> Do'stlaringizni taklif qiling va "
+                f"{Config.REFERRAL_BONUS_DAYS} kunlik bonus oling!"
+            )
+    else:
         welcome_text = (
-            f"👋 <b>Assalomu alaykum, {first_name}!</b>\n\n"
-            f"📱 <b>Outline VPN botiga xush kelibsiz!</b>\n\n"
-            "📍 <b>Bot orqali quyidagilarni amalga oshirishingiz mumkin:</b>\n"
-            "• VPN kalit olish\n"
-            "• Hisob to'ldirish\n"
-            "• Do'stlarni taklif qilish\n"
-            "• Balansingizni ko'rish\n\n"
-            "👇 <b>Quyidagi tugmalardan foydalaning:</b>"
+            f"👋 Qaytganingiz bilan, {first_name}!\n\n"
+            f"🤖 <b>VPN botiga xush kelibsiz!</b>\n"
+            f"Quyidagi bo'limlardan foydalaning:"
         )
-        
-        await message.answer(
-            welcome_text,
-            reply_markup=get_main_menu_keyboard(),
-            parse_mode="HTML"
-        )
-        
-    except Exception as e:
-        logger.error(f"Start command error: {e}")
-        await message.answer(
-            "❌ Xatolik yuz berdi. Iltimos, qayta urinib ko'ring yoki adminga murojaat qiling.",
-            parse_mode="HTML"
-        )
+    
+    await message.answer(
+        welcome_text,
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="HTML"
+    )
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
