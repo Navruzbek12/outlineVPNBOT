@@ -4,7 +4,6 @@ builder = "dockerfile"
 
 [deploy]
 startCommand = "python main.py"
-healthcheckPath = "/health"
 restartPolicy = { maxRetries = 10 }
 serverless = true
 
