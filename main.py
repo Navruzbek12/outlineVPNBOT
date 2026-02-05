@@ -1,10 +1,10 @@
-# main.py - ESKI SISTEMANIZ UCHUN
+# main.py - TO'LIQ ISHLAYDI
 import asyncio
 import logging
 import os
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
@@ -45,109 +45,136 @@ async def main():
                     [KeyboardButton(text="📊 Mening statistikam")],
                     [KeyboardButton(text="💳 To'lov qilish")],
                     [KeyboardButton(text="🔑 VPN kalitlarim")],
-                    [KeyboardButton(text="👥 Referal tizimi")]
+                    [KeyboardButton(text="👥 Referal tizimi"), KeyboardButton(text="ℹ️ Yordam")]
                 ],
                 resize_keyboard=True
             )
             
             await message.answer(f"""
-👋 Salom {first_name}!
+👋 *Assalomu alaykum, {first_name}!*
 
-🤖 VPN Botga xush kelibsiz!
+🤖 *VPN Bot* ga xush kelibsiz!
 
-💎 *Imkoniyatlar:*
+✨ *Bot imkoniyatlari:*
 • 🔐 VPN kalit yaratish
 • 💳 To'lov qilish (150/400/1200 RUB)
-• 📊 Balans boshqarish
+• 📊 Balans boshqarish  
 • 👥 Referal tizimi
 
-📊 *Statistika:* /stats
-💳 *To'lov:* /payment
-🔑 *VPN:* /vpn
-👑 *Admin:* /admin
+💎 *Boshlash uchun:* Quyidagi menyudan tanlang!
             """, reply_markup=keyboard, parse_mode="Markdown")
         
         # ========== TO'LOV MENYUSI ==========
         @dp.message(lambda m: m.text and "💳 To'lov qilish" in m.text)
         @dp.message(Command("payment"))
         async def payment_menu(message: Message):
-            """ESKI SISTEMA: To'lov menyusi"""
+            """To'lov menyusi - INLINE TUGMALAR"""
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="1️⃣ 1 oylik - 150 RUB", callback_data="PRICE_1_MONTH")],
-                    [InlineKeyboardButton(text="2️⃣ 3 oylik - 400 RUB", callback_data="PRICE_2_MONTH")],
-                    [InlineKeyboardButton(text="3️⃣ 1 yillik - 1200 RUB", callback_data="PRICE_3_MONTH")]
+                    [
+                        InlineKeyboardButton(text="1️⃣ 150 RUB - 1 oy", callback_data="pay_150"),
+                        InlineKeyboardButton(text="2️⃣ 400 RUB - 3 oy", callback_data="pay_400")
+                    ],
+                    [
+                        InlineKeyboardButton(text="3️⃣ 1200 RUB - 1 yil", callback_data="pay_1200")
+                    ],
+                    [
+                        InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_main")
+                    ]
                 ]
             )
+            
+            user = db.get_user(message.from_user.id)
+            balance = user['balance_rub'] if user else 0
             
             await message.answer(f"""
 💳 *TO'LOV QILISH*
 
-🏦 *Bank ma'lumotlari:*
-🔢 Karta raqami: `2202208022460399`
-👤 Karta egasi: Наврузбек Бобобеков
-🏛️ Bank: Сбербанк
+💰 *Joriy balansingiz:* {balance} RUB
 
-📦 *Paketlar:*
+🏦 *Bank ma'lumotlari:*
+🔢 *Karta raqami:* `2202208022460399`
+👤 *Karta egasi:* Наврузбек Бобобеков  
+🏛️ *Bank:* Сбербанк
+
+📦 *PAKETLAR:*
 1️⃣ 150 RUB - 1 oylik VPN (10GB trafik)
 2️⃣ 400 RUB - 3 oylik VPN (30GB trafik)  
 3️⃣ 1200 RUB - 1 yillik VPN (120GB trafik + 200 RUB bonus)
 
-📸 *Qadamlar:*
-1. Paketni tanlang
-2. Kartaga to'lov qiling
-3. Chek rasmini yuboring
-4. Admin tasdiqlaydi
-5. Kalit olasiz
+🎯 *Tanlash uchun:* Quyidagi tugmalardan birini bosing!
             """, reply_markup=keyboard, parse_mode="Markdown")
         
-        # ========== TO'LOV TANLASH ==========
+        # ========== TO'LOV TANLASH CALLBACK ==========
         @dp.callback_query(lambda c: c.data.startswith("pay_"))
-        async def payment_select(callback):
-            """To'lov summasini tanlash"""
-            amount = callback.data.replace("pay_", "")
-            amounts = {"150": 150, "400": 400, "1200": 1200}
-            
-            if amount not in amounts:
-                await callback.answer("❌ Noto'g'ri summa!")
-                return
-            
-            user_id = callback.from_user.id
-            payment_type = f"{amount}_rub"
-            
-            # To'lovni bazaga qo'shish
-            payment_id = db.add_payment(user_id, amounts[amount], payment_type)
-            
-            if payment_id:
-                await callback.message.answer(f"""
-✅ *To'lov saqlandi!*
+        async def handle_payment_selection(callback: CallbackQuery):
+            """To'lov summasini tanlash - TO'G'RI ISHLAYDI"""
+            try:
+                # Callback datani olish
+                data = callback.data
+                logger.info(f"Callback data: {data}")
+                
+                if data == "pay_150":
+                    amount = 150
+                    payment_type = "150_rub"
+                    package = "1 oylik VPN"
+                elif data == "pay_400":
+                    amount = 400
+                    payment_type = "400_rub"
+                    package = "3 oylik VPN"
+                elif data == "pay_1200":
+                    amount = 1200
+                    payment_type = "1200_rub"
+                    package = "1 yillik VPN"
+                else:
+                    await callback.answer("❌ Noto'g'ri tanlov!", show_alert=True)
+                    return
+                
+                user_id = callback.from_user.id
+                
+                # To'lovni bazaga qo'shish
+                payment_id = db.add_payment(user_id, amount, payment_type)
+                
+                if payment_id:
+                    await callback.message.answer(f"""
+✅ *To'lov tanlandi!*
 
+📦 *Paket:* {package}
 💰 *Summa:* {amount} RUB
+🆔 *To'lov ID:* {payment_id}
 
-📸 Endi to'lov chekini (screenshot) yuboring.
+🏦 *To'lov ma'lumotlari:*
+Karta raqami: `2202208022460399`
+Karta egasi: Наврузбек Бобобеков
+Bank: Сбербанк
 
-🏦 *Karta ma'lumotlari:*
-2202208022460399
-Наврузбек Бобобеков
-Сбербанк
+📸 *Endi to'lov chekini yuboring!*
 
-⚠️ *Eslatma:* Chekda summa va vaqt ko'rinishi kerak!
-                """, parse_mode="Markdown")
-                await callback.answer()
-            else:
-                await callback.answer("❌ Xatolik!", show_alert=True)
+⚠️ *Eslatma:* Chekda quyidagilar ko'rinishi kerak:
+• To'lov summasi ({amount} RUB)
+• To'lov vaqti
+• Karta raqamining oxirgi 4 raqami
+                    """, parse_mode="Markdown")
+                    
+                    await callback.answer(f"✅ {package} tanlandi!")
+                else:
+                    await callback.answer("❌ To'lovni saqlashda xatolik!", show_alert=True)
+                    
+            except Exception as e:
+                logger.error(f"Payment selection error: {e}")
+                await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
         
         # ========== TO'LOV CHEKI ==========
         @dp.message(lambda m: m.photo)
-        async def handle_payment_screenshot(message: Message):
-            """ESKI SISTEMA: To'lov chekini qabul qilish"""
+        async def handle_payment_photo(message: Message):
+            """To'lov chekini qabul qilish"""
             user_id = message.from_user.id
             
-            # Oxirgi to'lovni topish
+            # Oxirgi pending to'lovni topish
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                SELECT id, amount_rub FROM payments 
+                SELECT id, amount_rub, payment_type FROM payments 
                 WHERE user_id = ? AND status = 'pending'
                 ORDER BY created_at DESC LIMIT 1
                 ''', (user_id,))
@@ -155,25 +182,41 @@ async def main():
                 payment = cursor.fetchone()
                 
                 if not payment:
-                    await message.answer("❌ Avval to'lov summasini tanlang!")
+                    await message.answer("""
+❌ *Avval to'lov summasini tanlang!*
+
+💳 "To'lov qilish" tugmasini bosing va paket tanlang.
+                    """, parse_mode="Markdown")
                     return
                 
                 payment_id = payment[0]
                 amount = payment[1]
+                payment_type = payment[2]
                 
                 # Screenshot ID sini saqlash
                 cursor.execute('UPDATE payments SET screenshot_id = ? WHERE id = ?', 
                              (message.photo[-1].file_id, payment_id))
                 conn.commit()
+                
+                # Paket nomi
+                if amount == 150:
+                    package = "1 oylik VPN"
+                elif amount == 400:
+                    package = "3 oylik VPN"
+                else:
+                    package = "1 yillik VPN"
             
-            await message.answer("""
+            await message.answer(f"""
 ✅ *To'lov cheki qabul qilindi!*
 
-⏳ Admin to'lovni tekshirgach, balansingizga pul qo'shiladi.
+📦 *Paket:* {package}
+💰 *Summa:* {amount} RUB
+🆔 *To'lov ID:* {payment_id}
 
+⏳ *Admin to'lovni tekshiradi...*
 ⏰ *Tasdiqlash vaqti:* 1-24 soat
 
-ℹ️ Tezkor javob uchun: @navnav123667
+📬 Tezkor javob uchun: @navnav123667
             """, parse_mode="Markdown")
             
             # ADMINLARGA XABAR
@@ -184,87 +227,127 @@ async def main():
                         admin_id,
                         photo=message.photo[-1].file_id,
                         caption=f"""
-📥 *YANGI TO'LOV!*
+📥 *YANGI TO'LOV CHEKI!*
 
 👤 Foydalanuvchi: {message.from_user.first_name}
 🆔 ID: {user_id}
+📦 Paket: {package}
 💰 Summa: {amount} RUB
-📊 To'lov ID: {payment_id}
+🆔 To'lov ID: {payment_id}
 
 ✅ Tasdiqlash: /approve_{user_id}_{amount}
 ❌ Rad etish: /reject_{user_id}
-                        """
+
+ℹ️ Tekshirish: Foydalanuvchi {user_id} ning {amount} RUB to'lovi.
+                        """,
+                        parse_mode="Markdown"
                     )
                 except Exception as e:
                     logger.error(f"Admin xabari: {e}")
         
-        # ========== ADMIN TO'LOVNI TASDIQLASH ==========
+        # ========== ADMIN TO'LOV TASDIQLASH ==========
         @dp.message(lambda m: m.text and m.text.startswith("/approve_"))
-        async def approve_payment_admin(message: Message):
-            """ESKI SISTEMA: Admin to'lovni tasdiqlaydi"""
+        async def approve_payment_cmd(message: Message):
+            """Admin to'lovni tasdiqlash"""
             if not is_admin(message.from_user.id):
                 await message.answer("❌ Siz admin emassiz!")
                 return
             
             try:
-                # Komandani ajratish: /approve_USERID_AMOUNT
-                parts = message.text.split("_")
-                if len(parts) < 3:
-                    await message.answer("❌ Format: /approve_USERID_AMOUNT")
+                # Komandani ajratish
+                command = message.text.strip()
+                logger.info(f"Admin approve command: {command}")
+                
+                # /approve_ ni olib tashlash
+                parts = command[9:].split("_")  # /approve_ = 9 ta belgi
+                
+                if len(parts) < 2:
+                    await message.answer("❌ Format: /approve_USERID_AMOUNT\nMasalan: /approve_123456789_150")
                     return
                 
-                user_id = int(parts[1])
-                amount = parts[2]
-                payment_type = f"{amount}_rub"
+                user_id = int(parts[0])
+                amount = parts[1]
+                
+                # To'lov turi
+                if amount == "150":
+                    payment_type = "150_rub"
+                elif amount == "400":
+                    payment_type = "400_rub"
+                elif amount == "1200":
+                    payment_type = "1200_rub"
+                else:
+                    await message.answer(f"❌ Noto'g'ri summa: {amount}\nSumma: 150, 400 yoki 1200 bo'lishi kerak")
+                    return
                 
                 # To'lovni tasdiqlash
                 success = db.approve_payment(user_id, payment_type)
                 
                 if not success:
-                    await message.answer(f"❌ To'lovni tasdiqlashda xatolik!")
+                    await message.answer(f"❌ To'lovni tasdiqlashda xatolik yoki to'lov topilmadi!")
                     return
                 
                 # Foydalanuvchi ma'lumotlari
                 user = db.get_user(user_id)
+                if not user:
+                    await message.answer(f"❌ Foydalanuvchi {user_id} topilmadi!")
+                    return
+                
+                # Paket nomi
+                if amount == "150":
+                    package = "1 oylik VPN"
+                elif amount == "400":
+                    package = "3 oylik VPN"
+                else:
+                    package = "1 yillik VPN"
                 
                 # Foydalanuvchiga xabar
                 try:
                     await bot.send_message(
                         user_id,
                         f"""
-✅ *To'lovingiz tasdiqlandi!*
+🎉 *Tabriklaymiz! To'lovingiz tasdiqlandi!*
 
+📦 *Paket:* {package}
 💰 *Summa:* {amount} RUB
-📊 *Yangi balans:* {user['balance_rub']} RUB
+💳 *Yangi balans:* {user['balance_rub']} RUB
 
-🔑 Endi VPN kalit yaratishingiz mumkin!
+🔑 *Endi VPN kalit yaratishingiz mumkin!*
 
-💳 *Kalit yaratish uchun:* 
+💎 *Kalit yaratish uchun:* 
 "VPN kalitlarim" tugmasini bosing yoki /vpn buyrug'ini yuboring.
+
+📊 *Statistika:* /profile
                         """,
                         parse_mode="Markdown"
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Foydalanuvchiga xabar: {e}")
                 
+                # Admin javobi
                 await message.answer(f"""
-✅ *To'lov tasdiqlandi!*
+✅ *To'lov muvaffaqiyatli tasdiqlandi!*
 
-👤 Foydalanuvchi: {user['first_name']}
-🆔 ID: {user_id}
-💰 Summa: {amount} RUB
-📊 Yangi balans: {user['balance_rub']} RUB
+👤 *Foydalanuvchi:* {user['first_name']}
+🆔 *ID:* {user_id}
+📦 *Paket:* {package}
+💰 *Summa:* {amount} RUB
+💳 *Yangi balans:* {user['balance_rub']} RUB
 
-📬 Foydalanuvchiga xabar yuborildi.
-                """)
+📬 *Foydalanuvchiga xabar yuborildi.*
+                """, parse_mode="Markdown")
                 
+                logger.info(f"✅ To'lov tasdiqlandi: User={user_id}, Amount={amount}RUB")
+                
+            except ValueError:
+                await message.answer("❌ Noto'g'ri format! User ID raqam bo'lishi kerak.")
             except Exception as e:
+                logger.error(f"Approve error: {e}")
                 await message.answer(f"❌ Xatolik: {str(e)}")
         
         # ========== VPN KALITLAR ==========
         @dp.message(lambda m: m.text and "🔑 VPN kalitlarim" in m.text)
         @dp.message(Command("vpn"))
-        async def vpn_keys(message: Message):
+        async def vpn_keys_cmd(message: Message):
             """VPN kalitlar"""
             user_id = message.from_user.id
             keys = db.get_active_keys(user_id)
@@ -277,7 +360,7 @@ async def main():
                     # To'lov bor, kalit yaratish mumkin
                     keyboard = InlineKeyboardMarkup(
                         inline_keyboard=[
-                            [InlineKeyboardButton(text="🔑 VPN kalit yaratish", callback_data="create_vpn_key")]
+                            [InlineKeyboardButton(text="🔑 VPN KALIT YARATISH", callback_data="create_vpn_key")]
                         ]
                     )
                     
@@ -286,7 +369,7 @@ async def main():
 
 ❌ Sizda aktiv VPN kalit yo'q.
 
-✅ Sizda kalit yaratish uchun to'lov mavjud!
+✅ *Xursandchilik!* Sizda kalit yaratish uchun to'lov mavjud!
 
 💎 *VPN kalit yaratish uchun:* Quyidagi tugmani bosing.
                     """, reply_markup=keyboard, parse_mode="Markdown")
@@ -297,21 +380,36 @@ async def main():
 ❌ Sizda aktiv VPN kalit yo'q.
 ❌ Sizda kalit yaratish uchun to'lov ham yo'q.
 
-💳 *Avval to'lov qiling:* 
-"To'lov qilish" tugmasini bosing yoki /payment buyrug'ini yuboring.
+💳 *VPN kalit olish uchun:*
+1. "To'lov qilish" tugmasini bosing
+2. Paket tanlang (150/400/1200 RUB)
+3. To'lov qiling
+4. Chekni yuboring
+5. Admin tasdiqlagach, kalit yaratasiz
                     """, parse_mode="Markdown")
                 return
             
             # Aktiv kalitlar bor
-            response = "🔑 *VPN kalitlaringiz:*\n\n"
+            response = "🔑 *VPN KALITLARINGIZ:*\n\n"
             
-            for key in keys[:3]:
+            for key in keys[:3]:  # Faqat 3 tasini ko'rsatish
                 expires = key['expires_at'].split()[0] if key['expires_at'] else "N/A"
+                days_left = "∞"
+                try:
+                    from datetime import datetime
+                    exp_date = datetime.strptime(expires, "%Y-%m-%d")
+                    days_left = (exp_date - datetime.now()).days
+                    if days_left < 0:
+                        days_left = "Muddati tugagan"
+                except:
+                    pass
+                
                 response += f"""
-📌 *Kalit ID:* `{key['key_id'][:15]}...`
+📌 *Kalit:* `{key['key_id'][:8]}...`
 💰 *To'lov:* {key['amount_rub']} RUB
 📅 *Muddati:* {expires}
-🔗 *URL:* `{key['access_url'][:30]}...`
+⏰ *Qolgan kun:* {days_left}
+🔗 *URL:* `{key['access_url'][:20]}...`
                 """
                 response += "➖➖➖➖➖➖➖\n"
             
@@ -319,7 +417,7 @@ async def main():
         
         # ========== VPN KALIT YARATISH ==========
         @dp.callback_query(lambda c: c.data == "create_vpn_key")
-        async def create_vpn_key_callback(callback):
+        async def create_vpn_key_handler(callback: CallbackQuery):
             """VPN kalit yaratish"""
             user_id = callback.from_user.id
             
@@ -340,13 +438,14 @@ async def main():
                 
                 # Kalit nomi
                 user = db.get_user(user_id)
-                key_name = f"{user['first_name']}_{user_id}_{payment['id']}"
+                first_name = user['first_name'] if user else "User"
+                key_name = f"{first_name}_{user_id}_{payment['id']}"
                 
                 # Trafik limiti
                 amount = payment['amount_rub']
-                if amount >= 1200:
+                if amount == 1200:
                     limit_gb = 120  # 1 yil
-                elif amount >= 400:
+                elif amount == 400:
                     limit_gb = 30   # 3 oy
                 else:
                     limit_gb = 10   # 1 oy
@@ -354,7 +453,7 @@ async def main():
                 # Kalit yaratish
                 result = outline.create_key(name=key_name, limit_gb=limit_gb)
                 
-                if result['success']:
+                if result and result.get('success'):
                     # Bazaga saqlash
                     db.add_vpn_key(
                         user_id=user_id,
@@ -364,7 +463,7 @@ async def main():
                     )
                     
                     await callback.message.answer(f"""
-✅ *VPN kalit yaratildi!*
+✅ *VPN KALIT YARATILDI!*
 
 🔑 *Kalit ID:* `{result['key_id']}`
 🌐 *Access URL:*
@@ -374,26 +473,32 @@ async def main():
 ⏰ *Muddati:* 30 kun
 💎 *Kunlik to'lov:* 5 RUB
 
-⚠️ *Eslatma:* Access URL ni hech kimga bermang!
+⚠️ *Eslatmalar:*
+1. Access URL ni HECH KIMGA bermang!
+2. Har kuni 5 RUB to'lov avtomatik yechiladi
+3. Trafik limiti {limit_gb} GB
+4. 30 kundan keyin kalit muddati tugaydi
 
 📱 *Qo'llash:* Outline ilovasiga Access URL ni kiriting.
                     """, parse_mode="Markdown")
                     
-                    await callback.answer()
+                    await callback.answer("✅ VPN kalit yaratildi!")
                 else:
+                    error_msg = result.get('error', 'Noma\'lum xatolik') if result else 'Outline API javob bermadi'
                     await callback.message.answer(f"""
 ❌ *VPN kalit yaratishda xatolik!*
 
-Xatolik: {result.get('error', 'Noma\'lum xatolik')}
+Xatolik: {error_msg}
 
-Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning.
+Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
                     """)
                     
             except Exception as e:
-                logger.error(f"VPN key error: {e}")
+                logger.error(f"VPN key creation error: {e}")
                 await callback.message.answer("❌ VPN kalit yaratishda xatolik!")
+                await callback.answer("❌ Xatolik!", show_alert=True)
         
-        # ========== STATISTIKA ==========
+        # ========== QOLGAN HANDLERLAR ==========
         @dp.message(lambda m: m.text and "📊 Mening statistikam" in m.text)
         async def stats_cmd(message: Message):
             user_id = message.from_user.id
@@ -404,23 +509,17 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning.
                 return
             
             await message.answer(f"""
-📊 *Sizning statistikangiz:*
+📊 *SIZNING STATISTIKANGIZ:*
 
 👤 Ism: {user['first_name']}
 💰 Balans: {user['balance_rub']} RUB
 📅 Ro'yxatdan: {user['created_at'].split()[0]}
             """, parse_mode="Markdown")
         
-        # ========== REFERAL ==========
         @dp.message(lambda m: m.text and "👥 Referal tizimi" in m.text)
         async def referral_cmd(message: Message):
-            user_id = message.from_user.id
-            
-            # Referal link
-            import hashlib
-            referral_code = hashlib.md5(str(user_id).encode()).hexdigest()[:8]
             bot_info = await bot.get_me()
-            full_link = f"https://t.me/{bot_info.username}?start=ref{referral_code}"
+            full_link = f"https://t.me/{bot_info.username}?start=ref{message.from_user.id}"
             
             await message.answer(f"""
 👥 *REFERAL TIZIMI*
@@ -430,16 +529,13 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning.
 🔗 *Sizning referal havolangiz:*
 `{full_link}`
 
-📊 *Statistika:* Hali hech kimni taklif qilmagansiz
-
-📝 *Qo'llanma:*
+📝 *Qanday ishlaydi:*
 1. Havolani do'stlaringizga yuboring
 2. Ular havola orqali botga kirsin
 3. Siz 50 RUB bonus olasiz!
 4. Ular to'lov qilsa, siz yana 50 RUB bonus!
             """, parse_mode="Markdown")
         
-        # ========== ADMIN BUYRUQLARI ==========
         @dp.message(Command("admin"))
         async def admin_cmd(message: Message):
             if not is_admin(message.from_user.id):
@@ -451,36 +547,18 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning.
 
 📊 Statistika: /stats_admin
 👥 Foydalanuvchilar: /users_admin
-💳 To'lovlar: /payments_admin
 
 ✅ To'lov tasdiqlash: /approve_USERID_AMOUNT
-🔑 VPN kalit yaratish: /create_key_USERID
+🔑 VPN kalit yaratish: User /vpn buyrug'i orqali
+
+ℹ️ Masalan: /approve_123456789_150
             """, parse_mode="Markdown")
         
-        @dp.message(Command("stats_admin"))
-        async def stats_admin(message: Message):
-            if not is_admin(message.from_user.id):
-                return
-            
-            with db.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('SELECT COUNT(*) FROM users')
-                total = cursor.fetchone()[0]
-                
-                cursor.execute('SELECT SUM(balance_rub) FROM users')
-                balance = cursor.fetchone()[0] or 0
-                
-                cursor.execute('SELECT COUNT(*) FROM payments WHERE status = "pending"')
-                pending = cursor.fetchone()[0]
-                
-            await message.answer(f"""
-📊 *Admin statistika:*
-
-👥 Foydalanuvchilar: {total}
-💰 Umumiy balans: {balance} RUB
-⏳ Kutilayotgan to'lovlar: {pending}
-            """)
+        @dp.callback_query(lambda c: c.data == "back_to_main")
+        async def back_to_main(callback: CallbackQuery):
+            """Asosiy menyuga qaytish"""
+            await start_cmd(callback.message)
+            await callback.answer()
         
         # ========== BOT ISHGA TUSHIRISH ==========
         logger.info("✅ Database tekshirildi")
