@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 class BroadcastState(StatesGroup):
     """Broadcast uchun state"""
     waiting_for_message = State()
-
-@router.message(Command("admin"))
+    
+@router.message(Command("admin"), IsAdminFilter())
+async def admin_command(message: types.Message):
+    await message.answer("Admin paneliga xush kelibsiz!")
+    
+@router.message(Command("admin"), IsAdminFilter())
 @admin_only
 async def admin_panel(message: Message):
     """Admin panel"""
