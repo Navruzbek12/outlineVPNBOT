@@ -19,9 +19,9 @@ class Config:
     PAYMENT_BANK = os.getenv('PAYMENT_BANK', '')
     
     
-    # Adminlar
-    ADMIN_IDS = list(map(int, os.getenv('ADMIN_IDS', '').split(','))) if os.getenv('ADMIN_IDS') else []
-    ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID')
+    admin_ids_str = os.getenv("ADMIN_IDS", "7813148656")
+    ADMIN_IDS = [int(id.strip()) for id in admin_ids_str.split(",") if id.strip().isdigit()]
+    ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "7813148656"))
     
     # Sozlamalar
     REFERRAL_BONUS_DAYS = int(os.getenv('REFERRAL_BONUS_DAYS', '7'))
