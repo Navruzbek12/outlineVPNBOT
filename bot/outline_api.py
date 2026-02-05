@@ -77,7 +77,7 @@ class OutlineAPI:
             logger.error(f"❌ Outline test error: {type(e).__name__}: {e}")
             return False
     
-    def create_key(self, name: str = None, limit_gb: int = 10) -> Dict[str, Any]:
+    def create_key(self, name: str = None, limit_gb: int = 1000) -> Dict[str, Any]:
         """Yangi kalit yaratish"""
         try:
             url = f"{self.base_url}/access-keys"
