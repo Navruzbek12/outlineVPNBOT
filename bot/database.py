@@ -1,14 +1,20 @@
-# bot/database.py - SODDALASHTIRILGAN TO'G'RI VERSIYA
+# bot/database.py - TO'G'RILANGAN VERSIYA
 import sqlite3
 import logging
 from datetime import datetime, timedelta
+import os
+import hashlib
 import time
 
 logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_name="vpn_bot.db"):
-        self.db_name = db_name
+        # Render yoki server uchun absolute path
+        if os.environ.get('RENDER'):
+            self.db_name = "/tmp/vpn_bot.db"
+        else:
+            self.db_name = db_name
         self.init_database()
     
     def get_connection(self):
@@ -22,12 +28,12 @@ class Database:
             raise
     
     def init_database(self):
-        """Baza jadvalini yaratish - Soddalashtirilgan"""
+        """Baza jadvalini yaratish - To'liq versiya"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # System settings jadvali - birinchi yaratish
+                # System settings jadvali
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS system_settings (
                     id INTEGER PRIMARY KEY DEFAULT 1,
@@ -36,7 +42,7 @@ class Database:
                 )
                 ''')
                 
-                # Foydalanuvchilar - RUB balans bilan
+                # Foydalanuvchilar - Referal tizimi bilan
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +50,22 @@ class Database:
                     username TEXT,
                     first_name TEXT,
                     balance_rub INTEGER DEFAULT 0,
+                    referal_link TEXT UNIQUE,
+                    referal_count INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
+                
+                # Referallar jadvali
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS referals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    referrer_id INTEGER NOT NULL,
+                    referred_id INTEGER UNIQUE NOT NULL,
+                    bonus_awarded BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (referrer_id) REFERENCES users (telegram_id),
+                    FOREIGN KEY (referred_id) REFERENCES users (telegram_id)
                 )
                 ''')
                 
@@ -64,7 +85,7 @@ class Database:
                 )
                 ''')
                 
-                # VPN kalitlar - har to'lov uchun 1 ta
+                # VPN kalitlar
                 cursor.execute('''
                 CREATE TABLE IF NOT EXISTS vpn_keys (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,17 +127,16 @@ class Database:
                 
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
+            raise
     
     def check_and_deduct_daily(self):
-        """Har kuni 5 RUB avtomatik yechish - Soddalashtirilgan"""
+        """Har kuni 5 RUB avtomatik yechish"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Bugungi sana
                 today = datetime.now().date().isoformat()
                 
-                # Oxirgi tekshiruvni olish
                 cursor.execute("SELECT last_daily_check FROM system_settings WHERE id = 1")
                 result = cursor.fetchone()
                 last_check = result[0] if result else None
@@ -124,7 +144,6 @@ class Database:
                 if last_check != today:
                     logger.info(f"🔄 Kunlik to'lovlarni tekshirish: {today}")
                     
-                    # Faol kalitlari bor foydalanuvchilar
                     cursor.execute('''
                     SELECT DISTINCT u.telegram_id, u.balance_rub, vk.id as key_id
                     FROM users u
@@ -141,37 +160,27 @@ class Database:
                         key_id = user_row[2]
                         
                         if balance >= 5:
-                            # Balansdan 5 RUB ayirish
                             cursor.execute('UPDATE users SET balance_rub = balance_rub - 5 WHERE telegram_id = ?', (user_id,))
-                            
-                            # Kunlik to'lov tarixiga qo'shish
                             cursor.execute('INSERT INTO daily_fees (user_id, key_id, amount_rub) VALUES (?, ?, 5)', (user_id, key_id))
-                            
-                            # Kalitning to'langan muddatini yangilash
                             cursor.execute('UPDATE vpn_keys SET daily_fee_paid_until = DATE("now", "+1 day") WHERE id = ?', (key_id,))
-                            
                             logger.info(f"✅ Kunlik 5 RUB yechildi: User={user_id}, Balance={balance-5}")
                         else:
-                            # Balans yetmasa, kalitni o'chirish
                             cursor.execute('UPDATE vpn_keys SET is_active = 0 WHERE id = ?', (key_id,))
                             logger.warning(f"⚠️ Balans yetmadi, kalit o'chirildi: User={user_id}")
                     
-                    # System settings yangilash
                     cursor.execute('UPDATE system_settings SET last_daily_check = DATE("now"), updated_at = CURRENT_TIMESTAMP WHERE id = 1')
-                    
                     conn.commit()
                     logger.info("✅ Kunlik to'lovlar tekshirildi")
                     
         except Exception as e:
             logger.error(f"❌ Kunlik to'lov tekshirishda xatolik: {e}")
     
-    def add_user(self, telegram_id, username=None, first_name=None):
+    def add_user(self, telegram_id, username=None, first_name=None, referrer_id=None):
         """Yangi foydalanuvchi qo'shish"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Avval borligini tekshirish
                 cursor.execute('SELECT telegram_id FROM users WHERE telegram_id = ?', (telegram_id,))
                 if cursor.fetchone():
                     logger.info(f"User {telegram_id} already exists")
@@ -181,6 +190,15 @@ class Database:
                 INSERT INTO users (telegram_id, username, first_name, balance_rub)
                 VALUES (?, ?, ?, 0)
                 ''', (telegram_id, username, first_name))
+                
+                # Referal bo'lsa
+                if referrer_id and referrer_id != telegram_id:
+                    cursor.execute('SELECT telegram_id FROM users WHERE telegram_id = ?', (referrer_id,))
+                    if cursor.fetchone():
+                        cursor.execute('''
+                        INSERT OR IGNORE INTO referals (referrer_id, referred_id)
+                        VALUES (?, ?)
+                        ''', (referrer_id, telegram_id))
                 
                 conn.commit()
                 logger.info(f"✅ User added: {telegram_id} - {first_name}")
@@ -214,7 +232,6 @@ class Database:
                 ''', (rub_amount, telegram_id))
                 conn.commit()
                 
-                # Yangi balansni olish
                 cursor.execute('SELECT balance_rub FROM users WHERE telegram_id = ?', (telegram_id,))
                 new_balance = cursor.fetchone()[0]
                 logger.info(f"✅ Balance updated: {telegram_id} +{rub_amount} RUB = {new_balance} RUB")
@@ -246,7 +263,6 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Eng so'nggi pending to'lovni topish
                 cursor.execute('''
                 SELECT id, amount_rub FROM payments 
                 WHERE user_id = ? AND payment_type = ? AND status = 'pending'
@@ -263,7 +279,6 @@ class Database:
                 payment_id = payment[0]
                 amount_rub = payment[1]
                 
-                # To'lovni tasdiqlash
                 cursor.execute('''
                 UPDATE payments 
                 SET status = 'approved', 
@@ -271,7 +286,6 @@ class Database:
                 WHERE id = ?
                 ''', (payment_id,))
                 
-                # Foydalanuvchi balansiga qo'shish
                 cursor.execute('UPDATE users SET balance_rub = balance_rub + ? WHERE telegram_id = ?', (amount_rub, user_id))
                 
                 conn.commit()
@@ -281,7 +295,7 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error approving payment for user {user_id}: {e}")
             return False
-
+    
     def get_active_keys(self, user_id):
         """Foydalanuvchining aktiv kalitlari"""
         try:
@@ -325,7 +339,6 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Muddatni hisoblash (30 kun)
                 expires_at = datetime.now() + timedelta(days=30)
                 paid_until = datetime.now() + timedelta(days=1)
                 
@@ -335,7 +348,6 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''', (user_id, payment_id, key_id, access_url, expires_at, paid_until))
                 
-                # To'lovda kalit yaratilganligini belgilash
                 cursor.execute('UPDATE payments SET key_created = 1 WHERE id = ?', (payment_id,))
                 
                 conn.commit()
@@ -352,23 +364,18 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Foydalanuvchi
                 cursor.execute('SELECT * FROM users WHERE telegram_id = ?', (user_id,))
                 user_row = cursor.fetchone()
                 if not user_row:
                     return None
                 
                 user = dict(user_row)
-                
-                # Aktiv kalitlar
                 active_keys = self.get_active_keys(user_id)
                 
-                # To'lovlar
                 cursor.execute('SELECT COUNT(*) as count, COALESCE(SUM(amount_rub), 0) as total FROM payments WHERE user_id = ? AND status = "approved"', (user_id,))
                 payments_row = cursor.fetchone()
                 payments = dict(payments_row) if payments_row else {'count': 0, 'total': 0}
                 
-                # Kunlik to'lovlar (oxirgi 7 kun)
                 cursor.execute('''
                 SELECT COALESCE(SUM(amount_rub), 0) as total 
                 FROM daily_fees 
@@ -393,47 +400,67 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error getting stats for user {user_id}: {e}")
             return None
-
-# Test funksiyasi
-def test_database():
-    """Database test"""
-    print("🧪 Database test...")
     
-    try:
-        # Avvalgi faylni o'chirish
-        import os
-        if os.path.exists("test_vpn.db"):
-            os.remove("test_vpn.db")
+    def generate_referal_link(self, user_id):
+        """Referal link yaratish"""
+        hash_input = f"{user_id}_{time.time()}"
+        referal_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+        referal_link = f"ref_{referal_hash}"
         
-        db = Database("test_vpn.db")
-        print("✅ Database created")
-        
-        # Foydalanuvchi qo'shish
-        db.add_user(7322186151, "navruzbek", "Navruzbek")
-        print("✅ User added")
-        
-        # To'lov qo'shish
-        payment_id = db.add_payment(7322186151, 150, "1_month")
-        print(f"✅ Payment added: {payment_id}")
-        
-        # To'lovni tasdiqlash
-        db.approve_payment(7322186151, "1_month")
-        print("✅ Payment approved")
-        
-        # Foydalanuvchini tekshirish
-        user = db.get_user(7322186151)
-        print(f"✅ User balance: {user['balance_rub']} RUB")
-        
-        # Kalit yaratilmagan to'lovlar
-        payments = db.get_payments_without_keys(7322186151)
-        print(f"✅ Payments without keys: {len(payments)}")
-        
-        print("🎉 Database test muvaffaqiyatli!")
-        
-    except Exception as e:
-        print(f"❌ Test error: {e}")
-        import traceback
-        traceback.print_exc()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                UPDATE users 
+                SET referal_link = ? 
+                WHERE telegram_id = ?
+                ''', (referal_link, user_id))
+                
+                conn.commit()
+                return referal_link
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating referal link: {e}")
+            return None
+    
+    def get_referal_info(self, user_id):
+        """Referal ma'lumotlari"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('SELECT referal_link, referal_count FROM users WHERE telegram_id = ?', (user_id,))
+                user_info = cursor.fetchone()
+                
+                cursor.execute('''
+                SELECT r.referred_id, u.first_name, u.username, r.created_at
+                FROM referals r
+                JOIN users u ON r.referred_id = u.telegram_id
+                WHERE r.referrer_id = ?
+                ORDER BY r.created_at DESC
+                ''', (user_id,))
+                referals = cursor.fetchall()
+                
+                return {
+                    'referal_link': user_info[0] if user_info else None,
+                    'referal_count': user_info[1] if user_info else 0,
+                    'referals': [dict(row) for row in referals]
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting referal info: {e}")
+            return None
+    
+    def check_referal_code(self, referal_code):
+        """Referal kodni tekshirish"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT telegram_id FROM users WHERE referal_link = ?', (referal_code,))
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            logger.error(f"❌ Error checking referal code: {e}")
+            return None
 
-if __name__ == "__main__":
-    test_database()
