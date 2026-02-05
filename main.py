@@ -1,114 +1,228 @@
-# main.py - TO'LIQ YANGILANGAN
-import asyncio
-import logging
-import sys
+# bot/handlers/admin.py - YANGILANGAN (bot.utils ga muhtoj emas)
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from bot.database import Database
 import os
-from aiohttp import web
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from bot.config import Config
-from bot.handlers import setup_routers
-from bot.outline_api import OutlineAPI
+import logging
 
-# Logging sozlamalari
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout
-)
+router = Router()
+db = Database()
 logger = logging.getLogger(__name__)
 
-# Health check endpoint
-async def health_check(request):
-    return web.Response(text="OK")
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
 
-# Botni ishga tushirish funksiyasi
-async def start_bot():
-    """Botni ishga tushirish"""
+# Admin tekshiruvi funksiyasi - O'Z ICHIDA
+def is_admin(user_id: int) -> bool:
+    """Foydalanuvchi admin ekanligini tekshirish"""
+    admin_ids_str = os.getenv("ADMIN_IDS", "7813148656")
+    admin_ids = []
+    
+    for admin_id in admin_ids_str.split(","):
+        admin_id = admin_id.strip()
+        if admin_id.isdigit():
+            admin_ids.append(int(admin_id))
+    
+    return user_id in admin_ids
+
+async def admin_check(message: Message = None, callback: CallbackQuery = None) -> bool:
+    """Admin tekshiruvi"""
+    user_id = None
+    
+    if message:
+        user_id = message.from_user.id
+    elif callback:
+        user_id = callback.from_user.id
+    
+    if not user_id:
+        return False
+    
+    return is_admin(user_id)
+
+# ========== ADMIN HANDLERLARI ==========
+
+@router.message(Command("admin"))
+async def admin_panel(message: Message):
+    """Admin panel"""
+    if not await admin_check(message=message):
+        await message.answer("❌ Siz admin emassiz!")
+        return
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
+            [InlineKeyboardButton(text="📋 To'lovlar", callback_data="admin_payments")],
+            [InlineKeyboardButton(text="👤 Foydalanuvchilar", callback_data="admin_users")],
+            [InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast")],
+        ]
+    )
+    
+    await message.answer("👑 *Admin Panel*", reply_markup=keyboard, parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    """Umumiy statistika"""
+    if not await admin_check(callback=callback):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
     try:
-        # Konfiguratsiyani tekshirish
-        Config.validate()
-        logger.info("✅ Konfiguratsiya muvaffaqiyatli yuklandi")
-        
-        # Database yaratish
-        from bot.database import Database
-        db = Database()
-        logger.info("✅ Database yaratildi")
-        
-        # Outline API ulanishini test qilish
-        outline_api = OutlineAPI()
-        if outline_api.test_connection():
-            logger.info("✅ Outline serveriga muvaffaqiyatli ulanildi")
-        else:
-            logger.warning("⚠️ Outline serveriga ulanib bo'lmadi!")
-        
-        # Botni yaratish
-        bot = Bot(
-            token=Config.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-        )
-        
-        # Avvalgi webhook ni o'chirish
-        await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Bot webhook cleared")
-        
-        storage = MemoryStorage()
-        dp = Dispatcher(storage=storage)
-        
-        # Routerlarni qo'shish
-        dp.include_router(setup_routers())
-        
-        # Bot haqida ma'lumot
-        bot_info = await bot.get_me()
-        logger.info(f"🤖 Bot ishga tushdi: @{bot_info.username}")
-        
-        # Pollingni boshlash
-        await dp.start_polling(bot)
-        
-    except ValueError as e:
-        logger.error(f"❌ Konfiguratsiya xatosi: {e}")
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM users')
+            total_users = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT SUM(balance_rub) FROM users')
+            total_balance = cursor.fetchone()[0] or 0
+            
+            cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_active = 1')
+            active_keys = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM payments WHERE status = "pending"')
+            pending_payments = cursor.fetchone()[0]
+            
+            stats_text = f"""
+📊 *Admin Statistika*
+
+👥 Foydalanuvchilar: {total_users}
+💰 Umumiy balans: {total_balance} RUB
+🔑 Aktiv VPN kalitlar: {active_keys}
+⏳ Kutilayotgan to'lovlar: {pending_payments}
+            """
+            
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_stats"),
+                     InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_back")]
+                ]
+            )
+            
+            await callback.message.edit_text(stats_text, reply_markup=keyboard, parse_mode="Markdown")
+            
     except Exception as e:
-        logger.error(f"❌ Botda xatolik: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        logger.info("🛑 Bot to'xtatildi")
+        logger.error(f"❌ Admin stats error: {e}")
+        await callback.answer("❌ Xatolik!", show_alert=True)
 
-async def start_background_tasks(app):
-    """Background task sifatida botni ishga tushirish"""
-    app['bot_task'] = asyncio.create_task(start_bot())
+@router.callback_query(F.data == "admin_payments")
+async def admin_payments_list(callback: CallbackQuery):
+    """Tasdiqlanmagan to'lovlar"""
+    if not await admin_check(callback=callback):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT p.id, p.user_id, u.first_name, p.amount_rub, p.payment_type
+            FROM payments p
+            JOIN users u ON p.user_id = u.telegram_id
+            WHERE p.status = 'pending'
+            LIMIT 10
+            ''')
+            
+            payments = cursor.fetchall()
+            
+            if not payments:
+                await callback.message.edit_text("📭 Tasdiqlanmagan to'lov yo'q")
+                return
+            
+            response = "⏳ *Kutilayotgan to'lovlar:*\n\n"
+            for p in payments:
+                response += f"ID: {p[0]}\nUser: {p[2]} ({p[1]})\nSumma: {p[3]} RUB\nTur: {p[4]}\n\n"
+            
+            await callback.message.edit_text(response, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"❌ Payments error: {e}")
+        await callback.answer("❌ Xatolik!", show_alert=True)
 
-async def cleanup_background_tasks(app):
-    """Background tasklarni tozalash"""
-    if 'bot_task' in app:
-        app['bot_task'].cancel()
-        try:
-            await app['bot_task']
-        except asyncio.CancelledError:
-            pass
+@router.message(Command("approve"))
+async def approve_payment(message: Message):
+    """To'lovni tasdiqlash"""
+    if not await admin_check(message=message):
+        await message.answer("❌ Siz admin emassiz!")
+        return
+    
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            await message.answer("❌ Format: /approve <payment_id>")
+            return
+        
+        payment_id = int(args[1])
+        
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT user_id, amount_rub FROM payments 
+            WHERE id = ? AND status = 'pending'
+            ''', (payment_id,))
+            
+            payment = cursor.fetchone()
+            
+            if not payment:
+                await message.answer("❌ To'lov topilmadi!")
+                return
+            
+            user_id = payment[0]
+            amount = payment[1]
+            
+            # To'lovni tasdiqlash
+            cursor.execute('''
+            UPDATE payments 
+            SET status = 'approved', approved_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''', (payment_id,))
+            
+            # Balansni yangilash
+            cursor.execute('''
+            UPDATE users 
+            SET balance_rub = balance_rub + ? 
+            WHERE telegram_id = ?
+            ''', (amount, user_id))
+            
+            conn.commit()
+            
+            await message.answer(f"✅ To'lov {payment_id} tasdiqlandi!")
+            
+    except Exception as e:
+        logger.error(f"❌ Approve error: {e}")
+        await message.answer(f"❌ Xatolik: {e}")
 
-def main():
-    """Asosiy funksiya - HTTP SERVER BILAN"""
-    # Portni olish
-    port = int(os.environ.get("PORT", 10000))
+@router.message(Command("stats"))
+async def quick_stats(message: Message):
+    """Tezkor statistika"""
+    if not await admin_check(message=message):
+        await message.answer("❌ Siz admin emassiz!")
+        return
     
-    # Aiohttp application yaratish
-    app = web.Application()
-    
-    # Health check endpoint
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    
-    # Botni background da ishga tushirish
-    app.on_startup.append(start_background_tasks)
-    app.on_cleanup.append(cleanup_background_tasks)
-    
-    logger.info(f"🚀 Starting web server on port {port}")
-    
-    # Serverni ishga tushirish
-    web.run_app(app, host='0.0.0.0', port=port)
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM users')
+            total = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT SUM(balance_rub) FROM users')
+            balance = cursor.fetchone()[0] or 0
+            
+            await message.answer(f"📊 Stat: {total} user, {balance} RUB")
+            
+    except Exception as e:
+        await message.answer("❌ Xatolik!")
 
-if __name__ == "__main__":
-    main() 
+@router.callback_query(F.data == "admin_back")
+async def back_to_admin(callback: CallbackQuery):
+    """Orqaga"""
+    if not await admin_check(callback=callback):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    await admin_panel(callback.message)
