@@ -9,7 +9,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from bot.config import Config
-from bot.handlers import setup_routers
 from bot.outline_api import OutlineAPI
 
 # Logging sozlamalari
