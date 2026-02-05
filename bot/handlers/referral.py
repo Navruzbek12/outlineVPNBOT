@@ -98,7 +98,7 @@ async def show_referral_list(callback: CallbackQuery):
             response += f"{i}. {ref['name']} (@{ref['username']})\n"
             response += f"   📅 {ref['joined_date'].split()[0] if ref['joined_date'] else 'N/A'}\n"
             response += f"   💰 Holat: {ref['status']}\n"
-            response += f"   {'✅ Balansi bor' if ref['has_balance'] else '❌ Balans yo\'q'}\n\n"
+            response += f"   {'✅ Balansi bor' if ref['has_balance'] else '❌ Balans yoq'}\n\n"
         
         response += f"\n📊 *Jami: {len(referrals)} ta*"
         
