@@ -7,351 +7,11 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database - TO'G'RI IMPORT
-import sys
-sys.path.append('.')  # Current directory
-
-# Database klassini to'g'ridan-to'g'ri import qilamiz
-import sqlite3
-import hashlib
-import time
-from datetime import datetime, timedelta
-
-class Database:
-    def __init__(self, db_name="vpn_bot.db"):
-        # Render yoki server uchun absolute path
-        if os.environ.get('RENDER'):
-            self.db_name = "/tmp/vpn_bot.db"
-        else:
-            self.db_name = db_name
-        self.init_database()
-    
-    def get_connection(self):
-        """Bazaga ulanish"""
-        try:
-            conn = sqlite3.connect(self.db_name)
-            conn.row_factory = sqlite3.Row
-            return conn
-        except Exception as e:
-            logger.error(f"Database connection error: {e}")
-            raise
-    
-    def init_database(self):
-        """Baza jadvalini yaratish - To'liq versiya"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # System settings jadvali
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS system_settings (
-                    id INTEGER PRIMARY KEY DEFAULT 1,
-                    last_daily_check DATE,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                ''')
-                
-                # Foydalanuvchilar - Referal tizimi bilan
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER UNIQUE NOT NULL,
-                    username TEXT,
-                    first_name TEXT,
-                    balance_rub INTEGER DEFAULT 0,
-                    referal_link TEXT UNIQUE,
-                    referal_count INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                ''')
-                
-                # Referallar jadvali
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS referals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    referrer_id INTEGER NOT NULL,
-                    referred_id INTEGER UNIQUE NOT NULL,
-                    bonus_awarded BOOLEAN DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (referrer_id) REFERENCES users (telegram_id),
-                    FOREIGN KEY (referred_id) REFERENCES users (telegram_id)
-                )
-                ''')
-                
-                # To'lovlar tarixi
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS payments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    amount_rub INTEGER,
-                    payment_type TEXT,
-                    status TEXT DEFAULT "pending",
-                    screenshot_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    approved_at TIMESTAMP,
-                    key_created BOOLEAN DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users (telegram_id)
-                )
-                ''')
-                
-                # VPN kalitlar
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vpn_keys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    payment_id INTEGER NOT NULL,
-                    key_id TEXT UNIQUE,
-                    access_url TEXT,
-                    is_active BOOLEAN DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP,
-                    daily_fee_paid_until TIMESTAMP,
-                    traffic_limit_mb INTEGER DEFAULT 10240,
-                    traffic_used_mb INTEGER DEFAULT 0,
-                    traffic_reset_date DATE,
-                    FOREIGN KEY (user_id) REFERENCES users (telegram_id),
-                    FOREIGN KEY (payment_id) REFERENCES payments (id),
-                    UNIQUE(user_id, payment_id)
-                )
-                ''')
-                
-                # Kunlik to'lovlar tarixi
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS daily_fees (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    key_id INTEGER NOT NULL,
-                    amount_rub INTEGER DEFAULT 5,
-                    payment_date DATE DEFAULT CURRENT_DATE,
-                    FOREIGN KEY (user_id) REFERENCES users (telegram_id),
-                    FOREIGN KEY (key_id) REFERENCES vpn_keys (id)
-                )
-                ''')
-                
-                # VPN trafik monitoring jadvali
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS vpn_traffic (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    key_id INTEGER NOT NULL,
-                    date DATE DEFAULT CURRENT_DATE,
-                    download_mb INTEGER DEFAULT 0,
-                    upload_mb INTEGER DEFAULT 0,
-                    total_mb INTEGER DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users (telegram_id),
-                    FOREIGN KEY (key_id) REFERENCES vpn_keys (id),
-                    UNIQUE(user_id, key_id, date)
-                )
-                ''')
-                
-                # System settings uchun default qiymat
-                cursor.execute('''
-                INSERT OR IGNORE INTO system_settings (id, last_daily_check) 
-                VALUES (1, DATE('now', '-1 day'))
-                ''')
-                
-                conn.commit()
-                logger.info("✅ Database tables created successfully")
-                
-        except sqlite3.OperationalError as e:
-            # Jadval allaqachon yaratilgan bo'lishi mumkin
-            if "duplicate column name" not in str(e):
-                logger.error(f"Database initialization error: {e}")
-        except Exception as e:
-            logger.error(f"Database initialization error: {e}")
-            raise
-    
-    def add_user(self, telegram_id, username=None, first_name=None, referrer_id=None):
-        """Yangi foydalanuvchi qo'shish"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('SELECT telegram_id FROM users WHERE telegram_id = ?', (telegram_id,))
-                if cursor.fetchone():
-                    logger.info(f"User {telegram_id} already exists")
-                    return True
-                
-                cursor.execute('''
-                INSERT INTO users (telegram_id, username, first_name, balance_rub)
-                VALUES (?, ?, ?, 0)
-                ''', (telegram_id, username, first_name))
-                
-                # Referal bo'lsa
-                if referrer_id and referrer_id != telegram_id:
-                    cursor.execute('SELECT telegram_id FROM users WHERE telegram_id = ?', (referrer_id,))
-                    if cursor.fetchone():
-                        cursor.execute('''
-                        INSERT OR IGNORE INTO referals (referrer_id, referred_id)
-                        VALUES (?, ?)
-                        ''', (referrer_id, telegram_id))
-                
-                conn.commit()
-                logger.info(f"✅ User added: {telegram_id} - {first_name}")
-                return True
-                
-        except Exception as e:
-            logger.error(f"❌ Error adding user {telegram_id}: {e}")
-            return False
-    
-    def get_user(self, telegram_id):
-        """Foydalanuvchini olish"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT * FROM users WHERE telegram_id = ?', (telegram_id,))
-                row = cursor.fetchone()
-                return dict(row) if row else None
-        except Exception as e:
-            logger.error(f"❌ Error getting user {telegram_id}: {e}")
-            return None
-    
-    def update_user_balance(self, telegram_id, rub_amount):
-        """Balansni yangilash (RUB)"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                UPDATE users 
-                SET balance_rub = balance_rub + ? 
-                WHERE telegram_id = ?
-                ''', (rub_amount, telegram_id))
-                conn.commit()
-                
-                cursor.execute('SELECT balance_rub FROM users WHERE telegram_id = ?', (telegram_id,))
-                result = cursor.fetchone()
-                new_balance = result[0] if result else 0
-                logger.info(f"✅ Balance updated: {telegram_id} +{rub_amount} RUB = {new_balance} RUB")
-                return True
-        except Exception as e:
-            logger.error(f"❌ Error updating balance for {telegram_id}: {e}")
-            return False
-    
-    def add_payment(self, user_id, amount_rub, payment_type, screenshot_id=None):
-        """To'lov qo'shish"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                INSERT INTO payments (user_id, amount_rub, payment_type, screenshot_id)
-                VALUES (?, ?, ?, ?)
-                ''', (user_id, amount_rub, payment_type, screenshot_id))
-                conn.commit()
-                payment_id = cursor.lastrowid
-                logger.info(f"✅ Payment added: ID={payment_id}, User={user_id}, Amount={amount_rub} RUB")
-                return payment_id
-        except Exception as e:
-            logger.error(f"❌ Error adding payment for user {user_id}: {e}")
-            return None
-    
-    def approve_payment(self, user_id, payment_type):
-        """To'lovni tasdiqlash"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('''
-                SELECT id, amount_rub FROM payments 
-                WHERE user_id = ? AND payment_type = ? AND status = 'pending'
-                ORDER BY created_at DESC 
-                LIMIT 1
-                ''', (user_id, payment_type))
-                
-                payment = cursor.fetchone()
-                
-                if not payment:
-                    logger.warning(f"No pending payment found for user {user_id}, type {payment_type}")
-                    return False
-                
-                payment_id = payment[0]
-                amount_rub = payment[1]
-                
-                cursor.execute('''
-                UPDATE payments 
-                SET status = 'approved', 
-                    approved_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                ''', (payment_id,))
-                
-                cursor.execute('UPDATE users SET balance_rub = balance_rub + ? WHERE telegram_id = ?', (amount_rub, user_id))
-                
-                conn.commit()
-                logger.info(f"✅ Payment approved: ID={payment_id}, User={user_id}, Amount={amount_rub} RUB")
-                return True
-                
-        except Exception as e:
-            logger.error(f"❌ Error approving payment for user {user_id}: {e}")
-            return False
-    
-    def get_payments_without_keys(self, user_id):
-        """Kalit yaratilmagan to'lovlar"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                SELECT * FROM payments 
-                WHERE user_id = ? 
-                AND status = 'approved' 
-                AND key_created = 0
-                ORDER BY created_at DESC
-                ''', (user_id,))
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
-        except Exception as e:
-            logger.error(f"❌ Error getting payments without keys for {user_id}: {e}")
-            return []
-    
-    def add_vpn_key(self, user_id, payment_id, key_id, access_url, traffic_limit_mb=10240):
-        """VPN kalit qo'shish"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                expires_at = datetime.now() + timedelta(days=30)
-                paid_until = datetime.now() + timedelta(days=1)
-                
-                cursor.execute('''
-                INSERT INTO vpn_keys 
-                (user_id, payment_id, key_id, access_url, expires_at, daily_fee_paid_until, traffic_limit_mb)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (user_id, payment_id, key_id, access_url, expires_at, paid_until, traffic_limit_mb))
-                
-                cursor.execute('UPDATE payments SET key_created = 1 WHERE id = ?', (payment_id,))
-                
-                conn.commit()
-                key_db_id = cursor.lastrowid
-                logger.info(f"✅ VPN key added: User={user_id}, Payment={payment_id}, Limit={traffic_limit_mb}MB")
-                return key_db_id
-        except Exception as e:
-            logger.error(f"❌ Error adding VPN key for user {user_id}: {e}")
-            return None
-    
-    def get_active_keys(self, user_id):
-        """Foydalanuvchining aktiv kalitlari"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                SELECT vk.*, p.payment_type, p.amount_rub
-                FROM vpn_keys vk
-                JOIN payments p ON vk.payment_id = p.id
-                WHERE vk.user_id = ? 
-                AND vk.is_active = 1
-                ORDER BY vk.created_at DESC
-                ''', (user_id,))
-                rows = cursor.fetchall()
-                return [dict(row) for row in rows]
-        except Exception as e:
-            logger.error(f"❌ Error getting active keys for {user_id}: {e}")
-            return []
-
-# Database obyektini yaratish
+# Database
+from bot.database import Database
 db = Database()
 
 # Admin tekshiruvi
@@ -377,17 +37,8 @@ async def main():
             username = message.from_user.username
             first_name = message.from_user.first_name
             
-            # Referal parametrni tekshirish
-            args = message.text.split()
-            referrer_id = None
-            if len(args) > 1 and args[1].startswith('ref'):
-                try:
-                    referrer_id = int(args[1][3:])  # ref123456 -> 123456
-                except:
-                    pass
-            
             # User qo'shish
-            db.add_user(user_id, username, first_name, referrer_id)
+            db.add_user(user_id, username, first_name)
             
             keyboard = ReplyKeyboardMarkup(
                 keyboard=[
@@ -782,60 +433,69 @@ Bank: Сбербанк
             
             # Outline API orqali kalit yaratish
             try:
-                # Outline API simulyatsiyasi (haqiqiy API keyingi bosqichda)
-                # Bu yerda test uchun fake kalit yaratamiz
-                key_id = f"vpn_{user_id}_{int(time.time())}"
-                access_url = f"https://vpn.example.com/access#{key_id}"
+                from bot.outline_api import OutlineAPI
+                outline = OutlineAPI()
+                
+                # Kalit nomi
+                user = db.get_user(user_id)
+                first_name = user['first_name'] if user else "User"
+                key_name = f"{first_name}_{user_id}_{payment['id']}"
                 
                 # Trafik limiti
                 amount = payment['amount_rub']
                 if amount == 1200:
-                    limit_mb = 120 * 1024  # 120GB -> MB
+                    limit_gb = 120  # 1 yil
                 elif amount == 400:
-                    limit_mb = 30 * 1024   # 30GB -> MB
+                    limit_gb = 30   # 3 oy
                 else:
-                    limit_mb = 10 * 1024   # 10GB -> MB
+                    limit_gb = 10   # 1 oy
                 
-                # Bazaga saqlash
-                db.add_vpn_key(
-                    user_id=user_id,
-                    payment_id=payment['id'],
-                    key_id=key_id,
-                    access_url=access_url,
-                    traffic_limit_mb=limit_mb
-                )
+                # Kalit yaratish
+                result = outline.create_key(name=key_name, limit_gb=limit_gb)
                 
-                await callback.message.answer(f"""
+                if result and result.get('success'):
+                    # Bazaga saqlash
+                    db.add_vpn_key(
+                        user_id=user_id,
+                        payment_id=payment['id'],
+                        key_id=result['key_id'],
+                        access_url=result['access_url']
+                    )
+                    
+                    await callback.message.answer(f"""
 ✅ *VPN KALIT YARATILDI!*
 
-🔑 *Kalit ID:* `{key_id}`
+🔑 *Kalit ID:* `{result['key_id']}`
 🌐 *Access URL:*
-`{access_url}`
+`{result['access_url']}`
 
-📊 *Trafik limiti:* {limit_mb // 1024} GB
+📊 *Trafik limiti:* {limit_gb} GB
 ⏰ *Muddati:* 30 kun
 💎 *Kunlik to'lov:* 5 RUB
 
 ⚠️ *Eslatmalar:*
 1. Access URL ni HECH KIMGA bermang!
 2. Har kuni 5 RUB to'lov avtomatik yechiladi
-3. Trafik limiti {limit_mb // 1024} GB
+3. Trafik limiti {limit_gb} GB
 4. 30 kundan keyin kalit muddati tugaydi
 
 📱 *Qo'llash:* Outline ilovasiga Access URL ni kiriting.
-                """, parse_mode="Markdown")
-                
-                await callback.answer("✅ VPN kalit yaratildi!")
+                    """, parse_mode="Markdown")
+                    
+                    await callback.answer("✅ VPN kalit yaratildi!")
+                else:
+                    error_msg = result.get('error', 'Noma\'lum xatolik') if result else 'Outline API javob bermadi'
+                    await callback.message.answer(f"""
+❌ *VPN kalit yaratishda xatolik!*
+
+Xatolik: {error_msg}
+
+Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
+                    """)
                     
             except Exception as e:
                 logger.error(f"VPN key creation error: {e}")
-                await callback.message.answer(f"""
-❌ *VPN kalit yaratishda xatolik!*
-
-Xatolik: {str(e)}
-
-Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
-                """)
+                await callback.message.answer("❌ VPN kalit yaratishda xatolik!")
                 await callback.answer("❌ Xatolik!", show_alert=True)
         
         # ========== QOLGAN HANDLERLAR ==========
@@ -848,14 +508,11 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
                 await message.answer("❌ Foydalanuvchi topilmadi!")
                 return
             
-            keys = db.get_active_keys(user_id)
-            
             await message.answer(f"""
 📊 *SIZNING STATISTIKANGIZ:*
 
 👤 Ism: {user['first_name']}
 💰 Balans: {user['balance_rub']} RUB
-🔑 Aktiv kalitlar: {len(keys)} ta
 📅 Ro'yxatdan: {user['created_at'].split()[0]}
             """, parse_mode="Markdown")
         
@@ -885,24 +542,11 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
                 await message.answer("❌ Siz admin emassiz!")
                 return
             
-            # Foydalanuvchilar soni
-            with db.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM users')
-                users_count = cursor.fetchone()[0]
-                
-                cursor.execute('SELECT COUNT(*) FROM payments WHERE status = "approved"')
-                payments_count = cursor.fetchone()[0]
-                
-                cursor.execute('SELECT COUNT(*) FROM vpn_keys WHERE is_active = 1')
-                active_keys = cursor.fetchone()[0]
-            
-            await message.answer(f"""
-👑 *ADMIN STATISTIKA*
+            await message.answer("""
+👑 *ADMIN PANEL*
 
-👥 Foydalanuvchilar: {users_count} ta
-✅ Tasdiqlangan to'lovlar: {payments_count} ta
-🔑 Aktiv VPN kalitlar: {active_keys} ta
+📊 Statistika: /stats_admin
+👥 Foydalanuvchilar: /users_admin
 
 ✅ To'lov tasdiqlash: /approve_USERID_AMOUNT
 🔑 VPN kalit yaratish: User /vpn buyrug'i orqali
@@ -913,62 +557,8 @@ Iltimos, keyinroq urinib ko'ring yoki admin bilan bog'laning: @navnav123667
         @dp.callback_query(lambda c: c.data == "back_to_main")
         async def back_to_main(callback: CallbackQuery):
             """Asosiy menyuga qaytish"""
-            user_id = callback.from_user.id
-            user = db.get_user(user_id)
-            first_name = user['first_name'] if user else "Foydalanuvchi"
-            
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="📊 Mening statistikam")],
-                    [KeyboardButton(text="💳 To'lov qilish")],
-                    [KeyboardButton(text="🔑 VPN kalitlarim")],
-                    [KeyboardButton(text="👥 Referal tizimi"), KeyboardButton(text="ℹ️ Yordam")]
-                ],
-                resize_keyboard=True
-            )
-            
-            await callback.message.answer(f"""
-👋 *Assalomu alaykum, {first_name}!*
-
-Asosiy menyuga qaytdingiz.
-
-✨ *Bot imkoniyatlari:*
-• 🔐 VPN kalit yaratish
-• 💳 To'lov qilish (150/400/1200 RUB)
-• 📊 Balans boshqarish  
-• 👥 Referal tizimi
-
-💎 *Boshlash uchun:* Quyidagi menyudan tanlang!
-            """, reply_markup=keyboard, parse_mode="Markdown")
+            await start_cmd(callback.message)
             await callback.answer()
-        
-        # ========== YORDAM ==========
-        @dp.message(lambda m: m.text and "ℹ️ Yordam" in m.text)
-        @dp.message(Command("help"))
-        async def help_cmd(message: Message):
-            await message.answer("""
-ℹ️ *YORDAM VA QO'LLANMA*
-
-🤖 *Bot qanday ishlaydi?*
-1. 💳 "To'lov qilish" tugmasini bosing
-2. Paket tanlang (150/400/1200 RUB)
-3. Bank kartasiga to'lov qiling
-4. To'lov chekini yuboring
-5. Admin tasdiqlagach, VPN kalit yaratasiz
-
-💎 *Qo'shimcha imkoniyatlar:*
-• 📊 Mening statistikam - balans va aktiv kalitlar
-• 👥 Referal tizimi - do'stlarni taklif qilish
-• 🔑 VPN kalitlarim - barcha aktiv kalitlar
-
-⚠️ *Muhim eslatmalar:*
-• VPN kalit muddati - 30 kun
-• Kunlik to'lov - 5 RUB
-• Trafik limiti - paketga bog'liq
-• Access URL ni hech kimga bermang!
-
-📬 *Admin bilan bog'lanish:* @navnav123667
-            """, parse_mode="Markdown")
         
         # ========== BOT ISHGA TUSHIRISH ==========
         logger.info("✅ Database tekshirildi")
