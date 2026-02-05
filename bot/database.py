@@ -1,4 +1,3 @@
-# bot/database.py - TO'G'RILANGAN VERSIYA
 import sqlite3
 import logging
 from datetime import datetime, timedelta
@@ -116,6 +115,38 @@ class Database:
                 )
                 ''')
                 
+                # VPN trafik monitoring jadvali
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vpn_traffic (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    key_id INTEGER NOT NULL,
+                    date DATE DEFAULT CURRENT_DATE,
+                    download_mb INTEGER DEFAULT 0,
+                    upload_mb INTEGER DEFAULT 0,
+                    total_mb INTEGER DEFAULT 0,
+                    FOREIGN KEY (user_id) REFERENCES users (telegram_id),
+                    FOREIGN KEY (key_id) REFERENCES vpn_keys (id),
+                    UNIQUE(user_id, key_id, date)
+                )
+                ''')
+                
+                # VPN keys jadvaliga trafik limit qo'shish
+                cursor.execute('''
+                ALTER TABLE vpn_keys 
+                ADD COLUMN traffic_limit_mb INTEGER DEFAULT 10240
+                ''')
+                
+                cursor.execute('''
+                ALTER TABLE vpn_keys 
+                ADD COLUMN traffic_used_mb INTEGER DEFAULT 0
+                ''')
+                
+                cursor.execute('''
+                ALTER TABLE vpn_keys 
+                ADD COLUMN traffic_reset_date DATE
+                ''')
+                
                 # System settings uchun default qiymat
                 cursor.execute('''
                 INSERT OR IGNORE INTO system_settings (id, last_daily_check) 
@@ -125,6 +156,10 @@ class Database:
                 conn.commit()
                 logger.info("✅ Database tables created successfully")
                 
+        except sqlite3.OperationalError as e:
+            # Jadval allaqachon yaratilgan bo'lishi mumkin
+            if "duplicate column name" not in str(e):
+                logger.error(f"Database initialization error: {e}")
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
             raise
@@ -257,6 +292,38 @@ class Database:
             logger.error(f"❌ Error adding payment for user {user_id}: {e}")
             return None
     
+    def get_user_payments(self, user_id: int, limit: int = 50):
+        """Foydalanuvchining to'lovlar ro'yxati"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                SELECT id, amount_rub, payment_type, status, 
+                       created_at, approved_at, key_created
+                FROM payments 
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                ''', (user_id, limit))
+                
+                payments = []
+                for row in cursor.fetchall():
+                    payments.append({
+                        'id': row[0],
+                        'amount': row[1],
+                        'type': row[2],
+                        'status': row[3],
+                        'created_at': row[4],
+                        'approved_at': row[5],
+                        'key_created': bool(row[6])
+                    })
+                
+                return payments
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting user payments: {e}")
+            return []
+    
     def approve_payment(self, user_id, payment_type):
         """To'lovni tasdiqlash"""
         try:
@@ -333,7 +400,7 @@ class Database:
             logger.error(f"❌ Error getting payments without keys for {user_id}: {e}")
             return []
     
-    def add_vpn_key(self, user_id, payment_id, key_id, access_url):
+    def add_vpn_key(self, user_id, payment_id, key_id, access_url, traffic_limit_mb=10240):
         """VPN kalit qo'shish"""
         try:
             with self.get_connection() as conn:
@@ -344,15 +411,15 @@ class Database:
                 
                 cursor.execute('''
                 INSERT INTO vpn_keys 
-                (user_id, payment_id, key_id, access_url, expires_at, daily_fee_paid_until)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ''', (user_id, payment_id, key_id, access_url, expires_at, paid_until))
+                (user_id, payment_id, key_id, access_url, expires_at, daily_fee_paid_until, traffic_limit_mb)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, payment_id, key_id, access_url, expires_at, paid_until, traffic_limit_mb))
                 
                 cursor.execute('UPDATE payments SET key_created = 1 WHERE id = ?', (payment_id,))
                 
                 conn.commit()
                 key_db_id = cursor.lastrowid
-                logger.info(f"✅ VPN key added: User={user_id}, Payment={payment_id}")
+                logger.info(f"✅ VPN key added: User={user_id}, Payment={payment_id}, Limit={traffic_limit_mb}MB")
                 return key_db_id
         except Exception as e:
             logger.error(f"❌ Error adding VPN key for user {user_id}: {e}")
@@ -400,116 +467,285 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error getting stats for user {user_id}: {e}")
             return None
-    # bot/database.py ga quyidagi metodlarni QO'SHING:
-
-def get_referrals_count(self, user_id: int) -> dict:
-    """Foydalanuvchining referral statistikasini olish"""
-    try:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Umumiy va aktiv referral'lar soni
-            cursor.execute('''
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN bonus_awarded = 1 THEN 1 ELSE 0 END) as active
-            FROM referals 
-            WHERE referrer_id = ?
-            ''', (user_id,))
-            
-            result = cursor.fetchone()
-            total = result[0] if result and result[0] else 0
-            active = result[1] if result and result[1] else 0
-            
-            # Bonus miqdori
-            cursor.execute('''
-            SELECT COALESCE(SUM(CASE WHEN bonus_awarded = 1 THEN 50 ELSE 0 END), 0) as total_bonus
-            FROM referals 
-            WHERE referrer_id = ?
-            ''', (user_id,))
-            
-            bonus_result = cursor.fetchone()
-            total_bonus = bonus_result[0] if bonus_result else 0
-            
-            return {
-                'total': total,
-                'active': active,
-                'total_bonus': total_bonus,
-                'pending': total - active
-            }
-            
-    except Exception as e:
-        logger.error(f"❌ Error getting referrals count: {e}")
-        return {'total': 0, 'active': 0, 'total_bonus': 0, 'pending': 0}
-
-def get_referrals_list(self, user_id: int, limit: int = 10):
-    """Foydalanuvchining referral ro'yxatini olish"""
-    try:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-            SELECT 
-                r.referred_id,
-                u.username,
-                u.first_name,
-                u.created_at as joined_date,
-                r.created_at as referral_date,
-                r.bonus_awarded,
-                u.balance_rub > 0 as has_balance
-            FROM referals r
-            JOIN users u ON r.referred_id = u.telegram_id
-            WHERE r.referrer_id = ?
-            ORDER BY r.created_at DESC
-            LIMIT ?
-            ''', (user_id, limit))
-            
-            referrals = []
-            for row in cursor.fetchall():
-                referrals.append({
-                    'id': row[0],
-                    'username': row[1] or 'N/A',
-                    'name': row[2] or 'Foydalanuvchi',
-                    'joined_date': row[3],
-                    'referral_date': row[4],
-                    'bonus_awarded': bool(row[5]),
-                    'has_balance': bool(row[6]),
-                    'status': '✅ Bonus berildi' if row[5] else '⏳ Kutilmoqda'
-                })
-            
-            return referrals
-            
-    except Exception as e:
-        logger.error(f"❌ Error getting referrals list: {e}")
-        return []
-
-def get_or_create_referral_link(self, user_id: int) -> str:
-    """Foydalanuvchi uchun referral link olish yoki yaratish"""
-    try:
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Avval mavjud linkni tekshirish
-            cursor.execute('SELECT referal_link FROM users WHERE telegram_id = ?', (user_id,))
-            result = cursor.fetchone()
-            
-            if result and result[0]:
-                return result[0]
-            
-            # Yangi link yaratish
-            import hashlib
-            import time
-            
-            hash_input = f"{user_id}_{time.time()}"
-            referral_code = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-            
-            cursor.execute('UPDATE users SET referal_link = ? WHERE telegram_id = ?', (referral_code, user_id))
-            conn.commit()
-            
-            return referral_code
-            
-    except Exception as e:
-        logger.error(f"❌ Error creating referral link: {e}")
-        # Agar xatolik bo'lsa, oddiy kod yaratish
-        return f"ref{user_id}"
     
+    def get_referrals_count(self, user_id: int) -> dict:
+        """Foydalanuvchining referral statistikasini olish"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN bonus_awarded = 1 THEN 1 ELSE 0 END) as active
+                FROM referals 
+                WHERE referrer_id = ?
+                ''', (user_id,))
+                
+                result = cursor.fetchone()
+                total = result[0] if result and result[0] else 0
+                active = result[1] if result and result[1] else 0
+                
+                cursor.execute('''
+                SELECT COALESCE(SUM(CASE WHEN bonus_awarded = 1 THEN 50 ELSE 0 END), 0) as total_bonus
+                FROM referals 
+                WHERE referrer_id = ?
+                ''', (user_id,))
+                
+                bonus_result = cursor.fetchone()
+                total_bonus = bonus_result[0] if bonus_result else 0
+                
+                return {
+                    'total': total,
+                    'active': active,
+                    'total_bonus': total_bonus,
+                    'pending': total - active
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting referrals count: {e}")
+            return {'total': 0, 'active': 0, 'total_bonus': 0, 'pending': 0}
+    
+    def get_referrals_list(self, user_id: int, limit: int = 10):
+        """Foydalanuvchining referral ro'yxatini olish"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                SELECT 
+                    r.referred_id,
+                    u.username,
+                    u.first_name,
+                    u.created_at as joined_date,
+                    r.created_at as referral_date,
+                    r.bonus_awarded,
+                    u.balance_rub > 0 as has_balance
+                FROM referals r
+                JOIN users u ON r.referred_id = u.telegram_id
+                WHERE r.referrer_id = ?
+                ORDER BY r.created_at DESC
+                LIMIT ?
+                ''', (user_id, limit))
+                
+                referrals = []
+                for row in cursor.fetchall():
+                    has_balance_text = "✅ Balansi bor" if row[6] else "❌ Balans yo'q"
+                    referrals.append({
+                        'id': row[0],
+                        'username': row[1] or 'N/A',
+                        'name': row[2] or 'Foydalanuvchi',
+                        'joined_date': row[3],
+                        'referral_date': row[4],
+                        'bonus_awarded': bool(row[5]),
+                        'has_balance': bool(row[6]),
+                        'has_balance_text': has_balance_text,
+                        'status': '✅ Bonus berildi' if row[5] else '⏳ Kutilmoqda'
+                    })
+                
+                return referrals
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting referrals list: {e}")
+            return []
+    
+    def get_or_create_referral_link(self, user_id: int) -> str:
+        """Foydalanuvchi uchun referral link olish yoki yaratish"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('SELECT referal_link FROM users WHERE telegram_id = ?', (user_id,))
+                result = cursor.fetchone()
+                
+                if result and result[0]:
+                    return result[0]
+                
+                hash_input = f"{user_id}_{time.time()}"
+                referral_code = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+                
+                cursor.execute('UPDATE users SET referal_link = ? WHERE telegram_id = ?', (referral_code, user_id))
+                conn.commit()
+                
+                return referral_code
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating referral link: {e}")
+            return f"ref{user_id}"
+    
+    def update_traffic_usage(self, user_id: int, key_id: int, download_mb: int, upload_mb: int):
+        """Trafik sarfini yangilash"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                today = datetime.now().date().isoformat()
+                total_mb = download_mb + upload_mb
+                
+                cursor.execute('''
+                INSERT INTO vpn_traffic (user_id, key_id, date, download_mb, upload_mb, total_mb)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, key_id, date) 
+                DO UPDATE SET 
+                    download_mb = download_mb + excluded.download_mb,
+                    upload_mb = upload_mb + excluded.upload_mb,
+                    total_mb = total_mb + excluded.total_mb
+                ''', (user_id, key_id, today, download_mb, upload_mb, total_mb))
+                
+                cursor.execute('''
+                UPDATE vpn_keys 
+                SET traffic_used_mb = traffic_used_mb + ?
+                WHERE user_id = ? AND key_id = ?
+                ''', (total_mb, user_id, key_id))
+                
+                cursor.execute('''
+                SELECT traffic_limit_mb, traffic_used_mb 
+                FROM vpn_keys 
+                WHERE user_id = ? AND key_id = ?
+                ''', (user_id, key_id))
+                
+                result = cursor.fetchone()
+                if result:
+                    limit_mb = result[0] or 10240
+                    used_mb = (result[1] or 0) + total_mb
+                    
+                    if used_mb >= limit_mb:
+                        cursor.execute('''
+                        UPDATE vpn_keys 
+                        SET is_active = 0 
+                        WHERE user_id = ? AND key_id = ?
+                        ''', (user_id, key_id))
+                        
+                        logger.warning(f"⚠️ Traffic limit reached: User={user_id}, Used={used_mb}MB, Limit={limit_mb}MB")
+                
+                conn.commit()
+                logger.info(f"✅ Traffic updated: User={user_id}, Download={download_mb}MB, Upload={upload_mb}MB")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error updating traffic: {e}")
+            return False
+    
+    def reset_monthly_traffic(self):
+        """Oylik trafikni qayta tiklash"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                today = datetime.now().date()
+                first_day_of_month = today.replace(day=1).isoformat()
+                
+                cursor.execute('''
+                UPDATE vpn_keys 
+                SET traffic_used_mb = 0,
+                    traffic_reset_date = ?
+                WHERE traffic_reset_date < ? OR traffic_reset_date IS NULL
+                ''', (today.isoformat(), first_day_of_month))
+                
+                conn.commit()
+                logger.info("✅ Monthly traffic reset")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error resetting traffic: {e}")
+            return False
+    
+    def get_traffic_stats(self, user_id: int, key_id: int = None):
+        """Trafik statistikasi"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if key_id:
+                    cursor.execute('''
+                    SELECT 
+                        vk.traffic_limit_mb,
+                        vk.traffic_used_mb,
+                        vk.traffic_reset_date,
+                        COALESCE(SUM(vt.download_mb), 0) as total_download,
+                        COALESCE(SUM(vt.upload_mb), 0) as total_upload
+                    FROM vpn_keys vk
+                    LEFT JOIN vpn_traffic vt ON vk.id = vt.key_id
+                    WHERE vk.user_id = ? AND vk.key_id = ?
+                    GROUP BY vk.id
+                    ''', (user_id, key_id))
+                else:
+                    cursor.execute('''
+                    SELECT 
+                        vk.key_id,
+                        vk.traffic_limit_mb,
+                        vk.traffic_used_mb,
+                        vk.traffic_reset_date,
+                        COALESCE(SUM(vt.download_mb), 0) as total_download,
+                        COALESCE(SUM(vt.upload_mb), 0) as total_upload
+                    FROM vpn_keys vk
+                    LEFT JOIN vpn_traffic vt ON vk.id = vt.key_id
+                    WHERE vk.user_id = ?
+                    GROUP BY vk.id
+                    ''', (user_id,))
+                
+                results = cursor.fetchall()
+                
+                stats = []
+                for row in results:
+                    used_mb = row[2] if row[2] else 0
+                    limit_mb = row[1] if row[1] else 10240
+                    remaining_mb = max(0, limit_mb - used_mb)
+                    percent_used = (used_mb / limit_mb * 100) if limit_mb > 0 else 0
+                    
+                    stats.append({
+                        'key_id': row[0],
+                        'limit_mb': limit_mb,
+                        'used_mb': used_mb,
+                        'remaining_mb': remaining_mb,
+                        'percent_used': round(percent_used, 1),
+                        'reset_date': row[3],
+                        'total_download': row[4] if row[4] else 0,
+                        'total_upload': row[5] if row[5] else 0,
+                        'is_active': used_mb < limit_mb
+                    })
+                
+                return stats
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting traffic stats: {e}")
+            return []
+
+# Test funksiyasi
+def test_database():
+    """Database test"""
+    print("🧪 Testing database...")
+    
+    try:
+        import os
+        if os.path.exists("test_vpn.db"):
+            os.remove("test_vpn.db")
+        
+        db = Database("test_vpn.db")
+        print("✅ Database created")
+        
+        # Test qilish
+        db.add_user(123456789, "testuser", "Test User")
+        print("✅ User added")
+        
+        payments = db.get_user_payments(123456789)
+        print(f"✅ User payments: {len(payments)}")
+        
+        stats = db.get_user_stats(123456789)
+        print(f"✅ User stats: {stats}")
+        
+        referral_stats = db.get_referrals_count(123456789)
+        print(f"✅ Referral stats: {referral_stats}")
+        
+        link = db.get_or_create_referral_link(123456789)
+        print(f"✅ Referral link: {link}")
+        
+        print("🎉 Database test successful!")
+        
+    except Exception as e:
+        print(f"❌ Test error: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    test_database()
