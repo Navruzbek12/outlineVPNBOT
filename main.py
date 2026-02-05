@@ -74,9 +74,9 @@ async def main():
             """ESKI SISTEMA: To'lov menyusi"""
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="1️⃣ 1 oylik - 150 RUB", callback_data="pay_150")],
-                    [InlineKeyboardButton(text="2️⃣ 3 oylik - 400 RUB", callback_data="pay_400")],
-                    [InlineKeyboardButton(text="3️⃣ 1 yillik - 1200 RUB", callback_data="pay_1200")]
+                    [InlineKeyboardButton(text="1️⃣ 1 oylik - 150 RUB", callback_data="PRICE_1_MONTH")],
+                    [InlineKeyboardButton(text="2️⃣ 3 oylik - 400 RUB", callback_data="PRICE_2_MONTH")],
+                    [InlineKeyboardButton(text="3️⃣ 1 yillik - 1200 RUB", callback_data="PRICE_3_MONTH")]
                 ]
             )
             
