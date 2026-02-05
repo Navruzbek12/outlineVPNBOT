@@ -400,67 +400,116 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error getting stats for user {user_id}: {e}")
             return None
-    
-    def generate_referal_link(self, user_id):
-        """Referal link yaratish"""
-        hash_input = f"{user_id}_{time.time()}"
-        referal_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-        referal_link = f"ref_{referal_hash}"
-        
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('''
-                UPDATE users 
-                SET referal_link = ? 
-                WHERE telegram_id = ?
-                ''', (referal_link, user_id))
-                
-                conn.commit()
-                return referal_link
-                
-        except Exception as e:
-            logger.error(f"❌ Error generating referal link: {e}")
-            return None
-    
-    def get_referal_info(self, user_id):
-        """Referal ma'lumotlari"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('SELECT referal_link, referal_count FROM users WHERE telegram_id = ?', (user_id,))
-                user_info = cursor.fetchone()
-                
-                cursor.execute('''
-                SELECT r.referred_id, u.first_name, u.username, r.created_at
-                FROM referals r
-                JOIN users u ON r.referred_id = u.telegram_id
-                WHERE r.referrer_id = ?
-                ORDER BY r.created_at DESC
-                ''', (user_id,))
-                referals = cursor.fetchall()
-                
-                return {
-                    'referal_link': user_info[0] if user_info else None,
-                    'referal_count': user_info[1] if user_info else 0,
-                    'referals': [dict(row) for row in referals]
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Error getting referal info: {e}")
-            return None
-    
-    def check_referal_code(self, referal_code):
-        """Referal kodni tekshirish"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT telegram_id FROM users WHERE referal_link = ?', (referal_code,))
-                result = cursor.fetchone()
-                return result[0] if result else None
-        except Exception as e:
-            logger.error(f"❌ Error checking referal code: {e}")
-            return None
+    # bot/database.py ga quyidagi metodlarni QO'SHING:
 
+def get_referrals_count(self, user_id: int) -> dict:
+    """Foydalanuvchining referral statistikasini olish"""
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Umumiy va aktiv referral'lar soni
+            cursor.execute('''
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN bonus_awarded = 1 THEN 1 ELSE 0 END) as active
+            FROM referals 
+            WHERE referrer_id = ?
+            ''', (user_id,))
+            
+            result = cursor.fetchone()
+            total = result[0] if result and result[0] else 0
+            active = result[1] if result and result[1] else 0
+            
+            # Bonus miqdori
+            cursor.execute('''
+            SELECT COALESCE(SUM(CASE WHEN bonus_awarded = 1 THEN 50 ELSE 0 END), 0) as total_bonus
+            FROM referals 
+            WHERE referrer_id = ?
+            ''', (user_id,))
+            
+            bonus_result = cursor.fetchone()
+            total_bonus = bonus_result[0] if bonus_result else 0
+            
+            return {
+                'total': total,
+                'active': active,
+                'total_bonus': total_bonus,
+                'pending': total - active
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error getting referrals count: {e}")
+        return {'total': 0, 'active': 0, 'total_bonus': 0, 'pending': 0}
+
+def get_referrals_list(self, user_id: int, limit: int = 10):
+    """Foydalanuvchining referral ro'yxatini olish"""
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+            SELECT 
+                r.referred_id,
+                u.username,
+                u.first_name,
+                u.created_at as joined_date,
+                r.created_at as referral_date,
+                r.bonus_awarded,
+                u.balance_rub > 0 as has_balance
+            FROM referals r
+            JOIN users u ON r.referred_id = u.telegram_id
+            WHERE r.referrer_id = ?
+            ORDER BY r.created_at DESC
+            LIMIT ?
+            ''', (user_id, limit))
+            
+            referrals = []
+            for row in cursor.fetchall():
+                referrals.append({
+                    'id': row[0],
+                    'username': row[1] or 'N/A',
+                    'name': row[2] or 'Foydalanuvchi',
+                    'joined_date': row[3],
+                    'referral_date': row[4],
+                    'bonus_awarded': bool(row[5]),
+                    'has_balance': bool(row[6]),
+                    'status': '✅ Bonus berildi' if row[5] else '⏳ Kutilmoqda'
+                })
+            
+            return referrals
+            
+    except Exception as e:
+        logger.error(f"❌ Error getting referrals list: {e}")
+        return []
+
+def get_or_create_referral_link(self, user_id: int) -> str:
+    """Foydalanuvchi uchun referral link olish yoki yaratish"""
+    try:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Avval mavjud linkni tekshirish
+            cursor.execute('SELECT referal_link FROM users WHERE telegram_id = ?', (user_id,))
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                return result[0]
+            
+            # Yangi link yaratish
+            import hashlib
+            import time
+            
+            hash_input = f"{user_id}_{time.time()}"
+            referral_code = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+            
+            cursor.execute('UPDATE users SET referal_link = ? WHERE telegram_id = ?', (referral_code, user_id))
+            conn.commit()
+            
+            return referral_code
+            
+    except Exception as e:
+        logger.error(f"❌ Error creating referral link: {e}")
+        # Agar xatolik bo'lsa, oddiy kod yaratish
+        return f"ref{user_id}"
+    
