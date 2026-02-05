@@ -1,12 +1,16 @@
-# main.py - TO'G'RILANGAN VERSIYA
+# main.py - TO'LIQ YANGILANGAN
 import asyncio
 import logging
 import sys
 import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from bot.config import Config
+from bot.handlers import setup_routers
+from bot.outline_api import OutlineAPI
 
 # Logging sozlamalari
 logging.basicConfig(
@@ -16,19 +20,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def main():
-    """Asosiy funksiya - FAQQAT BOT"""
+# Health check endpoint
+async def health_check(request):
+    return web.Response(text="OK")
+
+# Botni ishga tushirish funksiyasi
+async def start_bot():
+    """Botni ishga tushirish"""
     try:
-        # Bot tokenini o'qish
-        BOT_TOKEN = os.getenv("BOT_TOKEN")
-        if not BOT_TOKEN:
-            raise ValueError("❌ BOT_TOKEN muhit o'zgaruvchisi o'rnatilmagan!")
+        # Konfiguratsiyani tekshirish
+        Config.validate()
+        logger.info("✅ Konfiguratsiya muvaffaqiyatli yuklandi")
         
-        logger.info("🤖 Bot ishga tushmoqda...")
+        # Database yaratish
+        from bot.database import Database
+        db = Database()
+        logger.info("✅ Database yaratildi")
+        
+        # Outline API ulanishini test qilish
+        outline_api = OutlineAPI()
+        if outline_api.test_connection():
+            logger.info("✅ Outline serveriga muvaffaqiyatli ulanildi")
+        else:
+            logger.warning("⚠️ Outline serveriga ulanib bo'lmadi!")
         
         # Botni yaratish
         bot = Bot(
-            token=BOT_TOKEN,
+            token=Config.BOT_TOKEN,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
         
@@ -36,71 +54,61 @@ async def main():
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Bot webhook cleared")
         
-        # Dispatcher yaratish
         storage = MemoryStorage()
         dp = Dispatcher(storage=storage)
         
-        # Handlerni import qilish
-        logger.info("📦 Handlerni yuklash...")
-        
-        from bot.handlers.start import router as start_router
-        from bot.handlers.admin import router as admin_router
-        from bot.handlers.payment import router as payment_router
-        from bot.handlers.profile import router as profile_router
-        from bot.handlers.vpn import router as vpn_router
-        from bot.handlers.referral import router as referral_router
-        
         # Routerlarni qo'shish
-        dp.include_router(start_router)
-        dp.include_router(admin_router)
-        dp.include_router(payment_router)
-        dp.include_router(profile_router)
-        dp.include_router(vpn_router)
-        dp.include_router(referral_router)
-        
-        logger.info("✅ Barcha handlerni yuklandi")
-        
-        # Database test
-        from bot.database import Database
-        db = Database()
-        logger.info("✅ Database yaratildi")
-        
-        # Outline test (agar sozlamalar bor bo'lsa)
-        try:
-            from bot.outline_api import OutlineAPI
-            outline_api = OutlineAPI()
-            if outline_api.test_connection():
-                logger.info("✅ Outline serveriga ulanildi")
-            else:
-                logger.warning("⚠️ Outline serveriga ulanib bo'lmadi")
-        except Exception as e:
-            logger.warning(f"⚠️ Outline test xatosi: {e}")
+        dp.include_router(setup_routers())
         
         # Bot haqida ma'lumot
         bot_info = await bot.get_me()
-        logger.info(f"✅ Bot ishga tushdi: @{bot_info.username}")
-        logger.info(f"🆔 Bot ID: {bot_info.id}")
+        logger.info(f"🤖 Bot ishga tushdi: @{bot_info.username}")
         
         # Pollingni boshlash
-        logger.info("🔄 Polling boshlandi...")
         await dp.start_polling(bot)
         
     except ValueError as e:
         logger.error(f"❌ Konfiguratsiya xatosi: {e}")
-        logger.info("ℹ️ .env faylini tekshiring yoki muhit o'zgaruvchilarini o'rnating")
-    except KeyboardInterrupt:
-        logger.info("🛑 Bot foydalanuvchi tomonidan to'xtatildi")
     except Exception as e:
-        logger.error(f"❌ Botda kutilmagan xatolik: {e}")
+        logger.error(f"❌ Botda xatolik: {e}")
         import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        traceback.print_exc()
     finally:
-        logger.info("👋 Bot dasturi tugadi")
+        logger.info("🛑 Bot to'xtatildi")
 
-def run_bot():
-    """Botni ishga tushirish funksiyasi"""
-    # FAQAT BOTNI ISHGA TUSHIRISH
-    asyncio.run(main())
+async def start_background_tasks(app):
+    """Background task sifatida botni ishga tushirish"""
+    app['bot_task'] = asyncio.create_task(start_bot())
+
+async def cleanup_background_tasks(app):
+    """Background tasklarni tozalash"""
+    if 'bot_task' in app:
+        app['bot_task'].cancel()
+        try:
+            await app['bot_task']
+        except asyncio.CancelledError:
+            pass
+
+def main():
+    """Asosiy funksiya - HTTP SERVER BILAN"""
+    # Portni olish
+    port = int(os.environ.get("PORT", 10000))
+    
+    # Aiohttp application yaratish
+    app = web.Application()
+    
+    # Health check endpoint
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    # Botni background da ishga tushirish
+    app.on_startup.append(start_background_tasks)
+    app.on_cleanup.append(cleanup_background_tasks)
+    
+    logger.info(f"🚀 Starting web server on port {port}")
+    
+    # Serverni ishga tushirish
+    web.run_app(app, host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    run_bot()
+    main() mana shu main.py fayli bu tugrima
